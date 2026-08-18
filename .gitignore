@@ -1,0 +1,26 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next
+/.next/
+/out/
+next-env.d.ts
+/build
+
+# database (local dev; regenerated from schema)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# env — NEVER commit real keys. .env.local holds secrets and is ignored.
+.env
+.env*.local
+
+# misc
+.DS_Store
+*.pem
+.vercel
+*.tsbuildinfo

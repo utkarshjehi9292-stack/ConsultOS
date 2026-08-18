@@ -1,0 +1,13 @@
+import { runSwotAnalysis } from "./lib/analyze";
+const out = await runSwotAnalysis({ name: "Stripe", website: "https://stripe.com", region: "US", cin: null, notes: null });
+const r = out.result;
+console.log("companyId:", out.companyId, "| lowConfidence:", out.lowConfidence);
+console.log("oneLiner:", r.company.oneLiner);
+console.log("financials:", r.company.financials.status, "| facts:", r.company.facts.length, "| sources:", r.sources.length);
+console.log("swot S/W/O/T:", r.swot.strengths.length, r.swot.weaknesses.length, r.swot.opportunities.length, r.swot.threats.length);
+console.log("confidence:", JSON.stringify(r.confidence));
+console.log("sample strength:", JSON.stringify(r.swot.strengths[0]));
+console.log("sample threat:", JSON.stringify(r.swot.threats[0]));
+const { verifyAnalysis } = await import("./lib/sanity");
+const rep = verifyAnalysis(r, r.sources.map(s=>s.url), Date.now());
+console.log("VERIFY ok on stored result:", rep.ok, "| errors:", rep.violations.filter(v=>v.severity==="error").length);

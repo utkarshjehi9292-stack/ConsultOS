@@ -1,0 +1,37 @@
+# Render Blueprint for ConsultOS.
+#
+# Runs the full Next.js server as a long-lived Node process, so better-sqlite3
+# (and the Claude Agent SDK subprocess, when ANTHROPIC_API_KEY is set) work. The
+# service is created via the Render API in this repo's setup, but this file
+# documents the config and supports the dashboard Blueprint flow too.
+
+services:
+  - type: web
+    name: consultos
+    runtime: node
+    plan: free
+    autoDeploy: false # GitHub Actions drives deploys (.github/workflows/deploy.yml)
+    buildCommand: npm ci && npm run build
+    startCommand: npx next start -p $PORT -H 0.0.0.0
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22" # better-sqlite3 has no Node 26 prebuild (also pinned via .node-version)
+      - key: NODE_ENV
+        value: production
+      # Free-tier Gemini: gemini-3.1-pro-preview needs billing, so run analysis on flash.
+      - key: CONSULTOS_ANALYSIS_MODEL
+        value: gemini-3.7-flash
+      # Secrets — set in the Render dashboard / via API, never committed:
+      - key: GOOGLE_API_KEY
+        sync: false
+      # - key: ANTHROPIC_API_KEY   # optional: enables the Claude Agent SDK research step
+      #   sync: false
+
+    # Durable SQLite (comparison of analyses across restarts) needs a paid plan +
+    # disk. On free, the DB is ephemeral. To make it durable: plan: starter, then
+    # uncomment the disk + CONSULTOS_DB_PATH below.
+    # disk:
+    #   name: consultos-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
