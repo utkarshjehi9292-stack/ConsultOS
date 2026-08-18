@@ -17,8 +17,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22" # better-sqlite3 has no Node 26 prebuild (also pinned via .node-version)
-      - key: NODE_ENV
-        value: production
+      # NB: do NOT set NODE_ENV=production here — it makes `npm ci` skip
+      # devDependencies (typescript, tailwind), which `next build` needs.
       # Free-tier Gemini: gemini-3.1-pro-preview needs billing, so run analysis on flash.
       - key: CONSULTOS_ANALYSIS_MODEL
         value: gemini-3.7-flash
