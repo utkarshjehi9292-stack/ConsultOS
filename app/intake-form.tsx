@@ -2,12 +2,18 @@
 
 import { useState } from "react";
 
+const ANALYSIS_MODELS = [
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash — free tier (recommended)" },
+  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro preview — needs billing" },
+];
+
 export function IntakeForm() {
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [cin, setCin] = useState("");
   const [region, setRegion] = useState("India");
   const [notes, setNotes] = useState("");
+  const [model, setModel] = useState("gemini-3.7-flash");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,6 +32,7 @@ export function IntakeForm() {
           cin: cin.trim() || null,
           region: region.trim() || null,
           notes: notes.trim() || null,
+          analysisModel: model,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -90,6 +97,27 @@ export function IntakeForm() {
           placeholder="e.g. considering entering quick-commerce; worried about CAC"
           className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2"
         />
+      </div>
+      <div>
+        <label htmlFor="model" className="block text-sm font-medium text-ink">
+          Analysis model
+        </label>
+        <select
+          id="model"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2"
+        >
+          {ANALYSIS_MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-ink/50">
+          Pro preview needs billing on the Google project. If it hits its quota, the analysis
+          automatically falls back to Flash.
+        </p>
       </div>
       {error && (
         <p className="rounded-md bg-flag/10 px-3 py-2 text-sm text-flag" role="alert">

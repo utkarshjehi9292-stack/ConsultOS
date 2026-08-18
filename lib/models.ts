@@ -23,6 +23,19 @@ export const AGENT = {
 /** temperature 0 for EXTRACT and DECODE (CLAUDE.md). Gemini accepts it. */
 export const DETERMINISTIC_TEMPERATURE = 0;
 
+/** Flash is the always-available free-tier model and the automatic fallback. */
+export const FLASH_MODEL = "gemini-3.7-flash";
+
+/** Analysis models the website lets the user choose between (per request). */
+export const ANALYSIS_MODELS = [
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash — free tier" },
+  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (preview) — needs billing" },
+] as const;
+
+export function isAllowedAnalysisModel(x: string): boolean {
+  return ANALYSIS_MODELS.some((m) => m.id === x);
+}
+
 export type Provider = "gemini" | "claude-agent";
 
 /** Which research provider will actually run, given the environment. */

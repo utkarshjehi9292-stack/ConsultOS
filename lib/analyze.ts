@@ -11,8 +11,8 @@
 // Every step is Zod-validated and retried (max 2) with feedback on failure, and
 // every call is logged to llm_calls.
 
-import { GEMINI, AGENT, researchProvider } from "./models";
-import { generateGrounded, generateStructured, sha256 } from "./providers/gemini";
+import { GEMINI, AGENT, FLASH_MODEL, isAllowedAnalysisModel, researchProvider } from "./models";
+import { generateGrounded, generateStructured, sha256, GeminiError } from "./providers/gemini";
 import { researchWithAgent } from "./providers/agent";
 import { extractJsonObject } from "./extract-json";
 import { toCompanyProfile, toSwot, geminiProfileSchema, geminiSwotSchema } from "./wire";
@@ -200,7 +200,15 @@ export interface AnalyzeOutput {
   lowConfidence: boolean;
 }
 
-export async function runSwotAnalysis(input: CompanyInput): Promise<AnalyzeOutput> {
+export interface AnalyzeOptions {
+  /** Analysis (SWOT) model chosen on the website; falls back to flash on quota. */
+  analysisModel?: string;
+}
+
+export async function runSwotAnalysis(
+  input: CompanyInput,
+  opts: AnalyzeOptions = {},
+): Promise<AnalyzeOutput> {
   const calls: CallTelemetry[] = [];
 
   const { findings, sources } = await research(input, calls);
@@ -220,21 +228,45 @@ export async function runSwotAnalysis(input: CompanyInput): Promise<AnalyzeOutpu
     calls,
   });
 
-  const { swot, notInData } = await structuredStep<{ swot: Swot; notInData: string[] }>({
-    stage: "swot",
-    model: GEMINI.analysis,
-    buildPrompt: (fb) => {
-      const base = swotTask(input, JSON.stringify(profile, null, 2), findings, sources);
-      return fb ? `${base}\n\n${fb}` : base;
-    },
-    responseSchema: geminiSwotSchema,
-    map: toSwot,
-    check: ({ swot }) => {
-      const all = [...swot.strengths, ...swot.weaknesses, ...swot.opportunities, ...swot.threats];
-      return invented(all.filter((c) => c.evidence.kind === "citation").map((c) => (c.evidence as { url: string }).url));
-    },
-    calls,
-  });
+  // The chosen analysis model (from the website), or the env default.
+  const chosenAnalysis =
+    opts.analysisModel && isAllowedAnalysisModel(opts.analysisModel) ? opts.analysisModel : GEMINI.analysis;
+
+  const runSwotStep = (model: string) =>
+    structuredStep<{ swot: Swot; notInData: string[] }>({
+      stage: "swot",
+      model,
+      buildPrompt: (fb) => {
+        const base = swotTask(input, JSON.stringify(profile, null, 2), findings, sources);
+        return fb ? `${base}\n\n${fb}` : base;
+      },
+      responseSchema: geminiSwotSchema,
+      map: toSwot,
+      check: ({ swot }) => {
+        const all = [...swot.strengths, ...swot.weaknesses, ...swot.opportunities, ...swot.threats];
+        return invented(all.filter((c) => c.evidence.kind === "citation").map((c) => (c.evidence as { url: string }).url));
+      },
+      calls,
+    });
+
+  // Auto-fallback: if the chosen model hits its quota (429), retry on flash so
+  // the analysis still ships. The website exposes the choice; this is the safety net.
+  let usedAnalysisModel = chosenAnalysis;
+  const fallbackNotes: string[] = [];
+  let swotOut: { swot: Swot; notInData: string[] };
+  try {
+    swotOut = await runSwotStep(chosenAnalysis);
+  } catch (e) {
+    if (e instanceof GeminiError && e.status === 429 && chosenAnalysis !== FLASH_MODEL) {
+      usedAnalysisModel = FLASH_MODEL;
+      fallbackNotes.push(`Analysis model ${chosenAnalysis} hit its quota; fell back to ${FLASH_MODEL}.`);
+      swotOut = await runSwotStep(FLASH_MODEL);
+    } else {
+      throw e;
+    }
+  }
+  const { swot } = swotOut;
+  const notInData = [...swotOut.notInData, ...fallbackNotes];
 
   let result: AnalysisResult = {
     company: profile,
@@ -255,7 +287,7 @@ export async function runSwotAnalysis(input: CompanyInput): Promise<AnalyzeOutpu
     notInData,
     provenance: {
       researchProvider: researchProvider(),
-      analysisModel: GEMINI.analysis,
+      analysisModel: usedAnalysisModel,
       extractModel: GEMINI.extract,
       generatedAt: new Date().toISOString(),
     },
@@ -272,7 +304,7 @@ export async function runSwotAnalysis(input: CompanyInput): Promise<AnalyzeOutpu
     research: RESEARCH_VERSION,
     extract: EXTRACT_VERSION,
     swot: SWOT_VERSION,
-    models: { analysis: GEMINI.analysis, extract: GEMINI.extract, research: researchProvider() === "claude-agent" ? AGENT.research : GEMINI.research },
+    models: { analysis: usedAnalysisModel, extract: GEMINI.extract, research: researchProvider() === "claude-agent" ? AGENT.research : GEMINI.research },
   });
 
   const { companyId, analysisId } = saveAnalysis({
