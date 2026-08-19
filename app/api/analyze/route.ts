@@ -1,7 +1,17 @@
 import { NextResponse } from "next/server";
-import { runSwotAnalysis, AnalyzeError } from "../../../lib/analyze";
+import { runSwotAnalysis, runGrowthAnalysis, runMemoAnalysis, AnalyzeError } from "../../../lib/analyze";
 import { GeminiError } from "../../../lib/providers/gemini";
 import type { CompanyInput } from "../../../prompts/tasks";
+
+const RUNNERS = {
+  swot: runSwotAnalysis,
+  growth: runGrowthAnalysis,
+  memo: runMemoAnalysis,
+} as const;
+type ModuleKey = keyof typeof RUNNERS;
+function isModule(x: unknown): x is ModuleKey {
+  return x === "swot" || x === "growth" || x === "memo";
+}
 
 export const runtime = "nodejs";
 // Research + two analysis calls can take a while; give it room.
@@ -27,9 +37,10 @@ export async function POST(req: Request) {
   };
   const analysisModel = typeof b.analysisModel === "string" ? b.analysisModel : undefined;
   const researchProvider = typeof b.researchProvider === "string" ? b.researchProvider : undefined;
+  const runner = RUNNERS[isModule(b.module) ? b.module : "swot"];
 
   try {
-    const out = await runSwotAnalysis(input, {
+    const out = await runner(input, {
       ...(analysisModel ? { analysisModel } : {}),
       ...(researchProvider ? { researchProvider } : {}),
     });

@@ -15,6 +15,8 @@ export interface CompanyInput {
 export const RESEARCH_VERSION = "research@1";
 export const EXTRACT_VERSION = "extract@1";
 export const SWOT_VERSION = "swot@1";
+export const GROWTH_VERSION = "growth@1";
+export const MEMO_VERSION = "memo@1";
 
 function companyLine(input: CompanyInput): string {
   const bits = [`Company: ${input.name}`];
@@ -87,6 +89,62 @@ STANDARDS:
 - Cite or flag every item: evidenceKind="citation" with a sourceUrl from the list below, OR evidenceKind="assumption"/"inference" folded into an assumptionNote. A strength/weakness is often an inference from facts — that's fine, mark it as an assumption with the reasoning, at medium/low confidence.
 - Steelman threats: state the strongest real version of why a competitor or incumbent wins.
 - Put everything you could NOT determine from the sources into notInData.
+
+AVAILABLE SOURCES (cite by exact URL):
+${sourceList(sources)}
+
+COMPANY PROFILE (JSON):
+${profileJson}
+
+RESEARCH FINDINGS:
+${findings}`;
+}
+
+/** Growth Opportunity Engine — Ansoff-driven, scored, sanity-checked. Gemini JSON mode. */
+export function growthTask(
+  input: CompanyInput,
+  profileJson: string,
+  findings: string,
+  sources: Citation[],
+): string {
+  return `Map growth opportunities for "${input.name}" using the Ansoff matrix.
+
+STANDARDS:
+- Produce 4–6 opportunities spanning the Ansoff quadrants: market_penetration, market_development, product_development, diversification. Set each item's "ansoff" accordingly.
+- Score each on capability adjacency (1–5), market attractiveness (1–5), and execution difficulty (1–5). Give a one-line reason for each score (adjacencyReason / attractivenessReason / difficultyReason). Higher difficulty = harder.
+- RANGES, NOT POINTS: for any forward-looking number, provide scenarios as low/base/high, each with the one-line driver assumption behind it (in "scenarios"). Do not state a single point estimate.
+- SANITY: if an opportunity implies a growth projection, fill impliedMarketSharePct, impliedHeadcount, and impliedCapitalNeed with the magnitudes it assumes (numbers; use null when not applicable). Be honest — the system will flag implausible implications.
+- Cite or flag every rationale: evidenceKind="citation" with a sourceUrl from the list below, or evidenceKind="assumption" with an assumptionNote. Strategy inferences are assumptions at medium/low confidence.
+- Do NOT rank or pick the best — the system computes priority as adjacency × attractiveness ÷ difficulty.
+- Put anything you could not determine into notInData.
+
+AVAILABLE SOURCES (cite by exact URL):
+${sourceList(sources)}
+
+COMPANY PROFILE (JSON):
+${profileJson}
+
+RESEARCH FINDINGS:
+${findings}`;
+}
+
+/** Consultant's Memo — Pyramid Principle, one page. Gemini JSON mode. */
+export function memoTask(
+  input: CompanyInput,
+  profileJson: string,
+  findings: string,
+  sources: Citation[],
+): string {
+  return `Write a one-page consultant's memo for "${input.name}", Pyramid-Principle structured.
+
+STRUCTURE (fill the fields):
+- answer: the single most important takeaway, in ONE sentence (answer first, no throat-clearing).
+- arguments: up to 3 supporting arguments. Each carries evidenceKind="citation" (with a sourceUrl from the list) or "assumption" (with an assumptionNote), and a confidence.
+- thereforeAction + thereforeTimeframe: a specific recommended action and by-when ("Therefore, do X by Y").
+- dataQualityNote: if data coverage is thin, lead with that here; otherwise null.
+- confidenceOutOf10: your honest confidence 0–10, given the sources.
+
+Write like a sharp colleague. No filler. A founder should be able to forward it without editing.
 
 AVAILABLE SOURCES (cite by exact URL):
 ${sourceList(sources)}

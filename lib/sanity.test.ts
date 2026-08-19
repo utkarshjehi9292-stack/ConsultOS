@@ -33,6 +33,7 @@ function assumptionClaim(confidence: Claim["confidence"] = "low"): Claim {
 
 function baseResult(over: Partial<AnalysisResult> = {}): AnalysisResult {
   return {
+    module: "swot",
     company: {
       name: "Acme",
       sector: "SaaS",

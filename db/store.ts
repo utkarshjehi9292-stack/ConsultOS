@@ -4,14 +4,14 @@ import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getDb } from "./client";
 import { analyses, companies, llmCalls } from "./schema";
-import type { AnalysisResult } from "../lib/schemas";
+import type { StoredResult } from "../lib/schemas";
 import type { CallTelemetry } from "../lib/telemetry";
 import type { CompanyInput } from "../prompts/tasks";
 
 export interface SaveInput {
   input: CompanyInput;
-  result: AnalysisResult;
-  type: "swot";
+  result: StoredResult;
+  type: "swot" | "growth" | "memo";
   modelVersion: string;
   lowConfidence: boolean;
   calls: CallTelemetry[];
@@ -72,7 +72,7 @@ export function saveAnalysis(save: SaveInput): { companyId: string; analysisId: 
   return { companyId, analysisId };
 }
 
-export function getLatestAnalysis(companyId: string): { result: AnalysisResult; createdAt: number } | null {
+export function getLatestAnalysis(companyId: string): { result: StoredResult; createdAt: number } | null {
   const db = getDb();
   const row = db
     .select()
@@ -81,5 +81,5 @@ export function getLatestAnalysis(companyId: string): { result: AnalysisResult; 
     .orderBy(desc(analyses.createdAt))
     .get();
   if (!row) return null;
-  return { result: JSON.parse(row.outputJson) as AnalysisResult, createdAt: row.createdAt };
+  return { result: JSON.parse(row.outputJson) as StoredResult, createdAt: row.createdAt };
 }

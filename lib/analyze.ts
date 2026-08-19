@@ -24,21 +24,47 @@ import {
 import { generateGrounded, generateStructured, sha256, GeminiError } from "./providers/gemini";
 import { researchWithAgent } from "./providers/agent";
 import { extractJsonObject } from "./extract-json";
-import { toCompanyProfile, toSwot, geminiProfileSchema, geminiSwotSchema } from "./wire";
+import {
+  toCompanyProfile,
+  toSwot,
+  toGrowth,
+  toMemo,
+  geminiProfileSchema,
+  geminiSwotSchema,
+  geminiGrowthSchema,
+  geminiMemoSchema,
+} from "./wire";
 import {
   computeModuleConfidence,
   normalizeUrl,
   verifyAnalysis,
   collectClaims,
+  sanitizeClaim,
+  checkProjection,
 } from "./sanity";
-import type { AnalysisResult, Citation, CompanyProfile, Swot } from "./schemas";
+import type {
+  AnalysisResult,
+  Citation,
+  Claim,
+  CompanyProfile,
+  GrowthResult,
+  Memo,
+  MemoResult,
+  Opportunity,
+  StoredResult,
+  Swot,
+} from "./schemas";
 import { addUsage, ZERO_USAGE, type CallTelemetry, type Usage } from "./telemetry";
 import { CONSULTANT_SYSTEM, CONSULTANT_SYSTEM_VERSION } from "../prompts/system";
 import {
   EXTRACT_VERSION,
   RESEARCH_VERSION,
   SWOT_VERSION,
+  GROWTH_VERSION,
+  MEMO_VERSION,
   extractTask,
+  growthTask,
+  memoTask,
   researchTaskAgent,
   researchTaskGemini,
   swotTask,
@@ -212,8 +238,22 @@ function sanitize(result: AnalysisResult, allowed: Set<string>): AnalysisResult 
 export interface AnalyzeOutput {
   companyId: string;
   analysisId: string;
-  result: AnalysisResult;
+  result: StoredResult;
   lowConfidence: boolean;
+}
+
+type ModuleType = "swot" | "growth" | "memo";
+
+function persist(
+  input: CompanyInput,
+  result: StoredResult,
+  type: ModuleType,
+  modelVersion: string,
+  calls: CallTelemetry[],
+): AnalyzeOutput {
+  const lowConfidence = result.confidence.band === "low";
+  const { companyId, analysisId } = saveAnalysis({ input, result, type, modelVersion, lowConfidence, calls });
+  return { companyId, analysisId, result, lowConfidence };
 }
 
 export interface AnalyzeOptions {
@@ -223,23 +263,29 @@ export interface AnalyzeOptions {
   researchProvider?: string;
 }
 
-export async function runSwotAnalysis(
-  input: CompanyInput,
-  opts: AnalyzeOptions = {},
-): Promise<AnalyzeOutput> {
+// Shared RESEARCH + EXTRACT stage, common to every module.
+interface Gathered {
+  calls: CallTelemetry[];
+  fallbackNotes: string[];
+  findings: string;
+  sources: Citation[];
+  allowed: Set<string>;
+  profile: CompanyProfile;
+  usedProvider: Provider;
+  invented: (urls: string[]) => string[];
+}
+
+async function gather(input: CompanyInput, opts: AnalyzeOptions): Promise<Gathered> {
   const calls: CallTelemetry[] = [];
   const fallbackNotes: string[] = [];
-
   const chosenResearch =
     opts.researchProvider && isAllowedResearchProvider(opts.researchProvider)
       ? opts.researchProvider
       : researchProvider();
   const { findings, sources, usedProvider } = await research(input, calls, chosenResearch, fallbackNotes);
   const allowed = new Set(sources.map((s) => normalizeUrl(s.url)));
-
   const invented = (urls: string[]) =>
     urls.filter((u) => !allowed.has(normalizeUrl(u))).map((u) => `Cited URL not in provided sources: ${u}`);
-
   const profile = await structuredStep<CompanyProfile>({
     stage: "extract",
     model: GEMINI.extract,
@@ -250,102 +296,183 @@ export async function runSwotAnalysis(
       invented(p.facts.filter((c) => c.evidence.kind === "citation").map((c) => (c.evidence as { url: string }).url)),
     calls,
   });
+  return { calls, fallbackNotes, findings, sources, allowed, profile, usedProvider, invented };
+}
 
-  // The chosen analysis model (from the website), or the env default.
-  const chosenAnalysis =
-    opts.analysisModel && isAllowedAnalysisModel(opts.analysisModel) ? opts.analysisModel : GEMINI.analysis;
+/** Run a module's analysis step at the chosen model, auto-falling back to flash on 429. */
+async function analysisStep<T>(
+  opts: AnalyzeOptions,
+  fallbackNotes: string[],
+  make: (model: string) => Promise<T>,
+): Promise<{ value: T; usedModel: string }> {
+  const chosen = opts.analysisModel && isAllowedAnalysisModel(opts.analysisModel) ? opts.analysisModel : GEMINI.analysis;
+  try {
+    return { value: await make(chosen), usedModel: chosen };
+  } catch (e) {
+    if (e instanceof GeminiError && e.status === 429 && chosen !== FLASH_MODEL) {
+      fallbackNotes.push(`Analysis model ${chosen} hit its quota; fell back to ${FLASH_MODEL}.`);
+      return { value: await make(FLASH_MODEL), usedModel: FLASH_MODEL };
+    }
+    throw e;
+  }
+}
 
-  const runSwotStep = (model: string) =>
+function provenanceOf(usedProvider: Provider, usedModel: string): AnalysisResult["provenance"] {
+  return {
+    researchProvider: usedProvider,
+    analysisModel: usedModel,
+    extractModel: GEMINI.extract,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function modelVersionOf(module: string, usedModel: string, usedProvider: Provider, moduleVersion: string): string {
+  return JSON.stringify({
+    module,
+    system: CONSULTANT_SYSTEM_VERSION,
+    research: RESEARCH_VERSION,
+    extract: EXTRACT_VERSION,
+    [module]: moduleVersion,
+    models: {
+      analysis: usedModel,
+      extract: GEMINI.extract,
+      research: usedProvider === "claude-agent" ? AGENT.research : GEMINI.research,
+    },
+  });
+}
+
+// --- Module 1: SWOT ---------------------------------------------------------
+
+export async function runSwotAnalysis(input: CompanyInput, opts: AnalyzeOptions = {}): Promise<AnalyzeOutput> {
+  const g = await gather(input, opts);
+
+  const { value: swotOut, usedModel } = await analysisStep(opts, g.fallbackNotes, (model) =>
     structuredStep<{ swot: Swot; notInData: string[] }>({
       stage: "swot",
       model,
       buildPrompt: (fb) => {
-        const base = swotTask(input, JSON.stringify(profile, null, 2), findings, sources);
+        const base = swotTask(input, JSON.stringify(g.profile, null, 2), g.findings, g.sources);
         return fb ? `${base}\n\n${fb}` : base;
       },
       responseSchema: geminiSwotSchema,
       map: toSwot,
       check: ({ swot }) => {
         const all = [...swot.strengths, ...swot.weaknesses, ...swot.opportunities, ...swot.threats];
-        return invented(all.filter((c) => c.evidence.kind === "citation").map((c) => (c.evidence as { url: string }).url));
+        return g.invented(all.filter((c) => c.evidence.kind === "citation").map((c) => (c.evidence as { url: string }).url));
       },
-      calls,
-    });
+      calls: g.calls,
+    }),
+  );
 
-  // Auto-fallback: if the chosen model hits its quota (429), retry on flash so
-  // the analysis still ships. The website exposes the choice; this is the safety net.
-  let usedAnalysisModel = chosenAnalysis;
-  let swotOut: { swot: Swot; notInData: string[] };
-  try {
-    swotOut = await runSwotStep(chosenAnalysis);
-  } catch (e) {
-    if (e instanceof GeminiError && e.status === 429 && chosenAnalysis !== FLASH_MODEL) {
-      usedAnalysisModel = FLASH_MODEL;
-      fallbackNotes.push(`Analysis model ${chosenAnalysis} hit its quota; fell back to ${FLASH_MODEL}.`);
-      swotOut = await runSwotStep(FLASH_MODEL);
-    } else {
-      throw e;
-    }
-  }
-  const { swot } = swotOut;
-  const notInData = [...swotOut.notInData, ...fallbackNotes];
-
+  const notInData = [...swotOut.notInData, ...g.fallbackNotes];
   let result: AnalysisResult = {
-    company: profile,
-    swot,
-    sources,
-    confidence: computeModuleConfidence(
-      collectClaims({
-        company: profile,
-        swot,
-        sources,
-        notInData,
-        confidence: { coveragePct: 0, sourceCount: 0, mostRecentSourceDaysAgo: null, band: "low" },
-        provenance: placeholderProvenance(),
-      }).map((c) => c.claim),
-      sources,
-      Date.now(),
-    ),
+    module: "swot",
+    company: g.profile,
+    swot: swotOut.swot,
+    sources: g.sources,
+    confidence: computeModuleConfidence([], g.sources, Date.now()),
     notInData,
-    provenance: {
-      researchProvider: usedProvider,
-      analysisModel: usedAnalysisModel,
-      extractModel: GEMINI.extract,
-      generatedAt: new Date().toISOString(),
-    },
+    provenance: provenanceOf(g.usedProvider, usedModel),
   };
-
-  // VERIFY, then sanitize to guarantee a clean stored artifact.
-  const report = verifyAnalysis(result, allowed, Date.now());
-  if (!report.ok) result = sanitize(result, allowed);
+  const report = verifyAnalysis(result, g.allowed, Date.now());
+  if (!report.ok) result = sanitize(result, g.allowed);
   else result.confidence = report.confidence;
 
-  const lowConfidence = result.confidence.band === "low";
-  const modelVersion = JSON.stringify({
-    system: CONSULTANT_SYSTEM_VERSION,
-    research: RESEARCH_VERSION,
-    extract: EXTRACT_VERSION,
-    swot: SWOT_VERSION,
-    models: { analysis: usedAnalysisModel, extract: GEMINI.extract, research: usedProvider === "claude-agent" ? AGENT.research : GEMINI.research },
-  });
-
-  const { companyId, analysisId } = saveAnalysis({
-    input,
-    result,
-    type: "swot",
-    modelVersion,
-    lowConfidence,
-    calls,
-  });
-
-  return { companyId, analysisId, result, lowConfidence };
+  return persist(input, result, "swot", modelVersionOf("swot", usedModel, g.usedProvider, SWOT_VERSION), g.calls);
 }
 
-function placeholderProvenance(): AnalysisResult["provenance"] {
-  return {
-    researchProvider: researchProvider(),
-    analysisModel: GEMINI.analysis,
-    extractModel: GEMINI.extract,
-    generatedAt: new Date().toISOString(),
+// --- Module 2: Growth Opportunity Engine (Ansoff) ---------------------------
+
+export async function runGrowthAnalysis(input: CompanyInput, opts: AnalyzeOptions = {}): Promise<AnalyzeOutput> {
+  const g = await gather(input, opts);
+
+  const { value: growthOut, usedModel } = await analysisStep(opts, g.fallbackNotes, (model) =>
+    structuredStep<{ opportunities: Opportunity[]; notInData: string[] }>({
+      stage: "growth",
+      model,
+      buildPrompt: (fb) => {
+        const base = growthTask(input, JSON.stringify(g.profile, null, 2), g.findings, g.sources);
+        return fb ? `${base}\n\n${fb}` : base;
+      },
+      responseSchema: geminiGrowthSchema,
+      map: toGrowth,
+      check: ({ opportunities }) =>
+        g.invented(
+          opportunities.filter((o) => o.evidence.kind === "citation").map((o) => (o.evidence as { url: string }).url),
+        ),
+      calls: g.calls,
+    }),
+  );
+
+  // Sanitize rationale claims, run projection sanity, rank by priority, pick best.
+  const opportunities = growthOut.opportunities
+    .map((o) => {
+      const claim: Claim = { statement: o.rationale, evidence: o.evidence, confidence: o.confidence };
+      const clean = sanitizeClaim(claim, g.allowed);
+      let sanity = o.sanity;
+      if (o.projection) {
+        sanity = checkProjection({
+          impliedMarketSharePct: o.projection.impliedMarketSharePct ?? 0,
+          impliedHeadcount: o.projection.impliedHeadcount ?? 1,
+          impliedCapitalNeed: o.projection.impliedCapitalNeed ?? 0,
+        });
+      }
+      return { ...o, evidence: clean.evidence, confidence: clean.confidence, sanity };
+    })
+    .sort((a, b) => b.priorityScore - a.priorityScore);
+
+  const bestThisQuarter = opportunities.length ? opportunities[0]!.title : null;
+  const claims: Claim[] = opportunities.map((o) => ({ statement: o.rationale, evidence: o.evidence, confidence: o.confidence }));
+
+  const result: GrowthResult = {
+    module: "growth",
+    company: g.profile,
+    growth: { opportunities, bestThisQuarter },
+    sources: g.sources,
+    confidence: computeModuleConfidence(claims, g.sources, Date.now()),
+    notInData: [...growthOut.notInData, ...g.fallbackNotes],
+    provenance: provenanceOf(g.usedProvider, usedModel),
   };
+
+  return persist(input, result, "growth", modelVersionOf("growth", usedModel, g.usedProvider, GROWTH_VERSION), g.calls);
+}
+
+// --- Module 3: Consultant's Memo (Pyramid Principle) ------------------------
+
+export async function runMemoAnalysis(input: CompanyInput, opts: AnalyzeOptions = {}): Promise<AnalyzeOutput> {
+  const g = await gather(input, opts);
+
+  const { value: memo, usedModel } = await analysisStep(opts, g.fallbackNotes, (model) =>
+    structuredStep<Memo>({
+      stage: "memo",
+      model,
+      buildPrompt: (fb) => {
+        const base = memoTask(input, JSON.stringify(g.profile, null, 2), g.findings, g.sources);
+        return fb ? `${base}\n\n${fb}` : base;
+      },
+      responseSchema: geminiMemoSchema,
+      map: toMemo,
+      check: (m) =>
+        g.invented(m.arguments.filter((a) => a.evidence.kind === "citation").map((a) => (a.evidence as { url: string }).url)),
+      calls: g.calls,
+    }),
+  );
+
+  const cleanArgs = memo.arguments.map((a) => {
+    const clean = sanitizeClaim({ statement: a.point, evidence: a.evidence, confidence: a.confidence }, g.allowed);
+    return { ...a, evidence: clean.evidence, confidence: clean.confidence };
+  });
+  const claims: Claim[] = cleanArgs.map((a) => ({ statement: a.point, evidence: a.evidence, confidence: a.confidence }));
+
+  const result: MemoResult = {
+    module: "memo",
+    company: g.profile,
+    memo: { ...memo, arguments: cleanArgs },
+    sources: g.sources,
+    confidence: computeModuleConfidence(claims, g.sources, Date.now()),
+    notInData: g.fallbackNotes,
+    provenance: provenanceOf(g.usedProvider, usedModel),
+  };
+
+  return persist(input, result, "memo", modelVersionOf("memo", usedModel, g.usedProvider, MEMO_VERSION), g.calls);
 }

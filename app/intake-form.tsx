@@ -12,12 +12,19 @@ const RESEARCH_PROVIDERS = [
   { id: "claude-agent", label: "Claude Agent SDK — needs ANTHROPIC_API_KEY" },
 ];
 
+const MODULES = [
+  { id: "swot", label: "SWOT analysis" },
+  { id: "growth", label: "Growth opportunities (Ansoff)" },
+  { id: "memo", label: "Consultant's memo" },
+];
+
 export function IntakeForm() {
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [cin, setCin] = useState("");
   const [region, setRegion] = useState("India");
   const [notes, setNotes] = useState("");
+  const [module, setModule] = useState("swot");
   const [model, setModel] = useState("gemini-3.7-flash");
   const [research, setResearch] = useState("gemini");
   const [busy, setBusy] = useState(false);
@@ -38,6 +45,7 @@ export function IntakeForm() {
           cin: cin.trim() || null,
           region: region.trim() || null,
           notes: notes.trim() || null,
+          module,
           analysisModel: model,
           researchProvider: research,
         }),
@@ -106,6 +114,23 @@ export function IntakeForm() {
         />
       </div>
       <div>
+        <label htmlFor="module" className="block text-sm font-medium text-ink">
+          Analysis module
+        </label>
+        <select
+          id="module"
+          value={module}
+          onChange={(e) => setModule(e.target.value)}
+          className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2"
+        >
+          {MODULES.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
         <label htmlFor="model" className="block text-sm font-medium text-ink">
           Analysis model
         </label>
@@ -157,7 +182,9 @@ export function IntakeForm() {
         disabled={busy}
         className="rounded-md bg-ink px-5 py-2.5 font-medium text-paper disabled:opacity-50"
       >
-        {busy ? "Researching & analysing… (this takes a minute)" : "Run SWOT analysis"}
+        {busy
+          ? "Researching & analysing… (this takes a minute)"
+          : `Run ${MODULES.find((m) => m.id === module)?.label ?? "analysis"}`}
       </button>
     </form>
   );

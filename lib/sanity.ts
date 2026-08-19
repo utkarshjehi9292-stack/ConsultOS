@@ -187,6 +187,46 @@ export function verifyAnalysis(
   return { ok, violations, confidence };
 }
 
+/**
+ * Downgrade/convert a single claim so it always passes VERIFY, without softening
+ * the gate: an unverifiable citation becomes a low-confidence assumption, a
+ * confident assumption drops to medium, hedged high-confidence drops to medium.
+ * Reused across SWOT, Growth, and Memo.
+ */
+export function sanitizeClaim(claim: Claim, allowed: Set<string>): Claim {
+  let evidence = claim.evidence;
+  let confidence = claim.confidence;
+  if (evidence.kind === "citation" && !allowed.has(normalizeUrl(evidence.url))) {
+    evidence = { kind: "assumption", note: "cited source was not retrieved; treat as unverified" };
+    confidence = "low";
+  }
+  if (evidence.kind === "assumption" && confidence === "high") confidence = "medium";
+  if (confidence === "high" && HEDGE_WORDS.some((w) => claim.statement.toLowerCase().includes(w))) {
+    confidence = "medium";
+  }
+  return { ...claim, evidence, confidence };
+}
+
+/** Per-claim VERIFY checks over an arbitrary claim list (used by Growth/Memo). */
+export function verifyClaimList(claims: Claim[], allowed: Set<string>): Violation[] {
+  const out: Violation[] = [];
+  claims.forEach((c, i) => {
+    const path = `[${i}]`;
+    if (c.evidence.kind === "citation") {
+      if (!allowed.has(normalizeUrl(c.evidence.url))) {
+        out.push({ severity: "error", rule: "invented-source", message: `Cited URL not retrieved: ${c.evidence.url}`, path });
+      }
+    } else if (c.confidence === "high") {
+      out.push({ severity: "error", rule: "confident-assumption", message: "Assumption cannot be high confidence.", path });
+    }
+    if (c.confidence === "high") {
+      const hit = HEDGE_WORDS.find((w) => c.statement.toLowerCase().includes(w));
+      if (hit) out.push({ severity: "error", rule: "hedged-high-confidence", message: `Hedging in high-confidence claim ("${hit}").`, path });
+    }
+  });
+  return out;
+}
+
 // --- Forward-looking projection sanity (Growth engine, Milestone 2) ----------
 // Built and tested now because CLAUDE.md requires the sanity-check layer tested
 // first. A growth projection must survive these before it can ship.

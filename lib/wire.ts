@@ -8,9 +8,13 @@
 
 import {
   CompanyProfileSchema,
+  MemoSchema,
+  OpportunitySchema,
   SwotSchema,
   type Claim,
   type CompanyProfile,
+  type Memo,
+  type Opportunity,
   type Swot,
 } from "./schemas";
 
@@ -87,6 +91,17 @@ function arr(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
 }
 
+function num(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+function numOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+function clampScore(v: unknown): number {
+  const n = Math.round(num(v));
+  return Math.max(1, Math.min(5, n || 1));
+}
+
 function mapClaim(raw: unknown): Claim {
   const c = obj(raw);
   const kind = str(c.evidenceKind) === "assumption" ? "assumption" : "citation";
@@ -141,4 +156,184 @@ export function toSwot(raw: unknown): { swot: Swot; notInData: string[] } {
   });
   const notInData = arr(s.notInData).map(str).filter((x) => x.length > 0);
   return { swot, notInData };
+}
+
+// --- Growth Opportunity Engine ----------------------------------------------
+
+const geminiOpportunity = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    ansoff: {
+      type: "string",
+      enum: ["market_penetration", "market_development", "product_development", "diversification"],
+    },
+    rationale: { type: "string" },
+    evidenceKind: { type: "string", enum: ["citation", "assumption"] },
+    sourceUrl: { type: "string", nullable: true },
+    sourceTitle: { type: "string", nullable: true },
+    assumptionNote: { type: "string", nullable: true },
+    confidence: { type: "string", enum: ["high", "medium", "low"] },
+    adjacency: { type: "integer" },
+    attractiveness: { type: "integer" },
+    difficulty: { type: "integer" },
+    adjacencyReason: { type: "string" },
+    attractivenessReason: { type: "string" },
+    difficultyReason: { type: "string" },
+    scenarios: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          level: { type: "string", enum: ["low", "base", "high"] },
+          value: { type: "string" },
+          driver: { type: "string" },
+        },
+        required: ["level", "value", "driver"],
+      },
+    },
+    impliedMarketSharePct: { type: "number", nullable: true },
+    impliedHeadcount: { type: "number", nullable: true },
+    impliedCapitalNeed: { type: "number", nullable: true },
+  },
+  required: [
+    "title",
+    "ansoff",
+    "rationale",
+    "evidenceKind",
+    "confidence",
+    "adjacency",
+    "attractiveness",
+    "difficulty",
+    "adjacencyReason",
+    "attractivenessReason",
+    "difficultyReason",
+  ],
+} as const;
+
+export const geminiGrowthSchema: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    opportunities: { type: "array", items: geminiOpportunity },
+    notInData: { type: "array", items: { type: "string" } },
+  },
+  required: ["opportunities"],
+};
+
+function mapOpportunity(raw: unknown): Opportunity {
+  const o = obj(raw);
+  const kind = str(o.evidenceKind) === "assumption" ? "assumption" : "citation";
+  const evidence =
+    kind === "citation"
+      ? { kind: "citation" as const, url: str(o.sourceUrl), title: strOrNull(o.sourceTitle) ?? str(o.sourceUrl), quote: null }
+      : { kind: "assumption" as const, note: strOrNull(o.assumptionNote) ?? "inference from company profile" };
+  const adjacency = clampScore(o.adjacency);
+  const attractiveness = clampScore(o.attractiveness);
+  const difficulty = clampScore(o.difficulty);
+  const confidenceRaw = str(o.confidence);
+  const confidence = (["high", "medium", "low"].includes(confidenceRaw) ? confidenceRaw : "low") as Opportunity["confidence"];
+  const ansoffRaw = str(o.ansoff);
+  const ansoff = (
+    ["market_penetration", "market_development", "product_development", "diversification"].includes(ansoffRaw)
+      ? ansoffRaw
+      : "market_penetration"
+  ) as Opportunity["ansoff"];
+
+  const scenarios = arr(o.scenarios)
+    .map((s) => obj(s))
+    .filter((s) => ["low", "base", "high"].includes(str(s.level)) && str(s.value))
+    .map((s) => ({ level: str(s.level) as "low" | "base" | "high", value: str(s.value), driver: str(s.driver) || "unstated" }));
+
+  const projValues = [o.impliedMarketSharePct, o.impliedHeadcount, o.impliedCapitalNeed];
+  const hasProjection = projValues.some((v) => typeof v === "number" && Number.isFinite(v));
+  const projection = hasProjection
+    ? {
+        impliedMarketSharePct: numOrNull(o.impliedMarketSharePct),
+        impliedHeadcount: numOrNull(o.impliedHeadcount),
+        impliedCapitalNeed: numOrNull(o.impliedCapitalNeed),
+      }
+    : null;
+
+  return OpportunitySchema.parse({
+    title: str(o.title),
+    ansoff,
+    rationale: str(o.rationale) || "unstated",
+    evidence,
+    confidence,
+    scores: { adjacency, attractiveness, difficulty },
+    scoreReasoning: {
+      adjacency: str(o.adjacencyReason) || "unstated",
+      attractiveness: str(o.attractivenessReason) || "unstated",
+      difficulty: str(o.difficultyReason) || "unstated",
+    },
+    // adjacency × attractiveness ÷ difficulty — computed here, not by the model.
+    priorityScore: Math.round(((adjacency * attractiveness) / difficulty) * 100) / 100,
+    scenarios,
+    projection,
+    sanity: null,
+  });
+}
+
+/** Map Gemini's growth output → ranked Opportunity[] + notInData (sanity filled by the orchestrator). */
+export function toGrowth(raw: unknown): { opportunities: Opportunity[]; notInData: string[] } {
+  const g = obj(raw);
+  const opportunities = arr(g.opportunities).map(mapOpportunity);
+  const notInData = arr(g.notInData).map(str).filter((x) => x.length > 0);
+  return { opportunities, notInData };
+}
+
+// --- Consultant's Memo (Pyramid Principle) ----------------------------------
+
+export const geminiMemoSchema: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    answer: { type: "string" },
+    arguments: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          point: { type: "string" },
+          evidenceKind: { type: "string", enum: ["citation", "assumption"] },
+          sourceUrl: { type: "string", nullable: true },
+          sourceTitle: { type: "string", nullable: true },
+          assumptionNote: { type: "string", nullable: true },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+        },
+        required: ["point", "evidenceKind", "confidence"],
+      },
+    },
+    thereforeAction: { type: "string" },
+    thereforeTimeframe: { type: "string" },
+    dataQualityNote: { type: "string", nullable: true },
+    confidenceOutOf10: { type: "number" },
+  },
+  required: ["answer", "thereforeAction", "thereforeTimeframe", "confidenceOutOf10"],
+};
+
+export function toMemo(raw: unknown): Memo {
+  const m = obj(raw);
+  const args = arr(m.arguments)
+    .slice(0, 3)
+    .map((a) => {
+      const c = obj(a);
+      const kind = str(c.evidenceKind) === "assumption" ? "assumption" : "citation";
+      const confidenceRaw = str(c.confidence);
+      const confidence = (["high", "medium", "low"].includes(confidenceRaw) ? confidenceRaw : "low") as Claim["confidence"];
+      return {
+        point: str(c.point),
+        evidence:
+          kind === "citation"
+            ? { kind: "citation" as const, url: str(c.sourceUrl), title: strOrNull(c.sourceTitle) ?? str(c.sourceUrl), quote: null }
+            : { kind: "assumption" as const, note: strOrNull(c.assumptionNote) ?? "inference" },
+        confidence,
+      };
+    });
+  return MemoSchema.parse({
+    answer: str(m.answer),
+    arguments: args,
+    therefore: { action: str(m.thereforeAction) || "unstated", timeframe: str(m.thereforeTimeframe) || "unstated" },
+    dataQualityNote: strOrNull(m.dataQualityNote),
+    confidenceOutOf10: Math.max(0, Math.min(10, num(m.confidenceOutOf10))),
+  });
 }

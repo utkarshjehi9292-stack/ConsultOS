@@ -97,19 +97,122 @@ export const ModuleConfidenceSchema = z.object({
 });
 export type ModuleConfidence = z.infer<typeof ModuleConfidenceSchema>;
 
+export const ProvenanceSchema = z.object({
+  researchProvider: z.enum(["gemini", "claude-agent"]),
+  analysisModel: z.string(),
+  extractModel: z.string(),
+  generatedAt: z.string(),
+});
+
 /** The stored, verified analysis for one company (readings + facts, kept honest). */
 export const AnalysisResultSchema = z.object({
+  module: z.literal("swot").default("swot"),
   company: CompanyProfileSchema,
   swot: SwotSchema,
   sources: z.array(CitationSchema).default([]),
   confidence: ModuleConfidenceSchema,
   /** Explicit list of things the analysis could NOT determine (builds trust). */
   notInData: z.array(z.string()).default([]),
-  provenance: z.object({
-    researchProvider: z.enum(["gemini", "claude-agent"]),
-    analysisModel: z.string(),
-    extractModel: z.string(),
-    generatedAt: z.string(),
-  }),
+  provenance: ProvenanceSchema,
 });
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
+
+// --- Milestone 2: Growth Opportunity Engine (Ansoff) ------------------------
+
+export const AnsoffQuadrant = z.enum([
+  "market_penetration",
+  "market_development",
+  "product_development",
+  "diversification",
+]);
+export type Ansoff = z.infer<typeof AnsoffQuadrant>;
+
+/** Forward-looking number as low/base/high with the driver behind each (ranges, not points). */
+export const ScenarioSchema = z.object({
+  level: z.enum(["low", "base", "high"]),
+  value: z.string().min(1), // verbatim, e.g. "₹8–10 Cr incremental revenue by FY27"
+  driver: z.string().min(1), // one-line assumption
+});
+export type Scenario = z.infer<typeof ScenarioSchema>;
+
+export const ScoresSchema = z.object({
+  adjacency: z.number().int().min(1).max(5), // capability adjacency
+  attractiveness: z.number().int().min(1).max(5), // market attractiveness
+  difficulty: z.number().int().min(1).max(5), // execution difficulty
+});
+
+/** Implied magnitudes the growth claim assumes — fed to the sanity checker. */
+export const ProjectionSchema = z.object({
+  impliedMarketSharePct: z.number().nullable(),
+  impliedHeadcount: z.number().nullable(),
+  impliedCapitalNeed: z.number().nullable(),
+});
+
+export const OpportunitySchema = z.object({
+  title: z.string().min(1),
+  ansoff: AnsoffQuadrant,
+  rationale: z.string().min(1),
+  evidence: EvidenceSchema,
+  confidence: Confidence,
+  scores: ScoresSchema,
+  scoreReasoning: z.object({
+    adjacency: z.string().min(1),
+    attractiveness: z.string().min(1),
+    difficulty: z.string().min(1),
+  }),
+  /** adjacency × attractiveness ÷ difficulty — computed in code, not by the model. */
+  priorityScore: z.number(),
+  scenarios: z.array(ScenarioSchema).default([]),
+  projection: ProjectionSchema.nullable().default(null),
+  /** Sanity-check result — computed; a failed check is surfaced, not softened. */
+  sanity: z
+    .object({ ok: z.boolean(), failures: z.array(z.string()), warnings: z.array(z.string()) })
+    .nullable()
+    .default(null),
+});
+export type Opportunity = z.infer<typeof OpportunitySchema>;
+
+export const GrowthResultSchema = z.object({
+  module: z.literal("growth"),
+  company: CompanyProfileSchema,
+  growth: z.object({
+    opportunities: z.array(OpportunitySchema).default([]),
+    bestThisQuarter: z.string().nullable(), // title of the top-ranked, code-chosen
+  }),
+  sources: z.array(CitationSchema).default([]),
+  confidence: ModuleConfidenceSchema,
+  notInData: z.array(z.string()).default([]),
+  provenance: ProvenanceSchema,
+});
+export type GrowthResult = z.infer<typeof GrowthResultSchema>;
+
+// --- Milestone 2: Consultant's Memo (Pyramid Principle) ---------------------
+
+export const MemoArgumentSchema = z.object({
+  point: z.string().min(1),
+  evidence: EvidenceSchema,
+  confidence: Confidence,
+});
+
+export const MemoSchema = z.object({
+  answer: z.string().min(1), // one sentence, the answer first
+  arguments: z.array(MemoArgumentSchema).max(3).default([]),
+  therefore: z.object({ action: z.string().min(1), timeframe: z.string().min(1) }),
+  dataQualityNote: z.string().nullable().default(null),
+  confidenceOutOf10: z.number().min(0).max(10),
+});
+export type Memo = z.infer<typeof MemoSchema>;
+
+export const MemoResultSchema = z.object({
+  module: z.literal("memo"),
+  company: CompanyProfileSchema,
+  memo: MemoSchema,
+  sources: z.array(CitationSchema).default([]),
+  confidence: ModuleConfidenceSchema,
+  notInData: z.array(z.string()).default([]),
+  provenance: ProvenanceSchema,
+});
+export type MemoResult = z.infer<typeof MemoResultSchema>;
+
+/** Any stored module result (the report page branches on `module`). */
+export type StoredResult = AnalysisResult | GrowthResult | MemoResult;
