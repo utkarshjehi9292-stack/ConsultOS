@@ -96,19 +96,28 @@ async function research(
     provider = "gemini";
   }
   if (provider === "claude-agent") {
-    const prompt = researchTaskAgent(input);
-    const r = await researchWithAgent({ system: CONSULTANT_SYSTEM, prompt });
-    calls.push({
-      provider: "claude-agent",
-      model: AGENT.research,
-      stage: "research",
-      promptHash: sha256(prompt),
-      usage: r.usage,
-      costUsd: r.costUsd,
-      latencyMs: Date.now() - t0,
-      attempts: 1,
-    });
-    return { findings: r.findings, sources: r.citations, usedProvider: "claude-agent" };
+    try {
+      const prompt = researchTaskAgent(input);
+      const r = await researchWithAgent({ system: CONSULTANT_SYSTEM, prompt });
+      calls.push({
+        provider: "claude-agent",
+        model: AGENT.research,
+        stage: "research",
+        promptHash: sha256(prompt),
+        usage: r.usage,
+        costUsd: r.costUsd,
+        latencyMs: Date.now() - t0,
+        attempts: 1,
+      });
+      return { findings: r.findings, sources: r.citations, usedProvider: "claude-agent" };
+    } catch (e) {
+      // The Agent SDK spawns the Claude Code runtime; if that or its auth fails,
+      // degrade to Gemini grounding rather than failing the whole analysis.
+      fallbackNotes.push(
+        `Claude Agent SDK research failed (${(e as Error).message?.slice(0, 140) ?? "unknown"}); used Gemini + Google Search instead.`,
+      );
+      provider = "gemini";
+    }
   }
   const prompt = researchTaskGemini(input);
   const r = await generateGrounded({ model: GEMINI.research, system: CONSULTANT_SYSTEM, prompt });
