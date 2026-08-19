@@ -7,6 +7,11 @@ const ANALYSIS_MODELS = [
   { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro preview — needs billing" },
 ];
 
+const RESEARCH_PROVIDERS = [
+  { id: "gemini", label: "Gemini + Google Search — free" },
+  { id: "claude-agent", label: "Claude Agent SDK — needs ANTHROPIC_API_KEY" },
+];
+
 export function IntakeForm() {
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
@@ -14,6 +19,7 @@ export function IntakeForm() {
   const [region, setRegion] = useState("India");
   const [notes, setNotes] = useState("");
   const [model, setModel] = useState("gemini-3.7-flash");
+  const [research, setResearch] = useState("gemini");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,6 +39,7 @@ export function IntakeForm() {
           region: region.trim() || null,
           notes: notes.trim() || null,
           analysisModel: model,
+          researchProvider: research,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -117,6 +124,27 @@ export function IntakeForm() {
         <p className="mt-1 text-xs text-ink/50">
           Pro preview needs billing on the Google project. If it hits its quota, the analysis
           automatically falls back to Flash.
+        </p>
+      </div>
+      <div>
+        <label htmlFor="research" className="block text-sm font-medium text-ink">
+          Research provider
+        </label>
+        <select
+          id="research"
+          value={research}
+          onChange={(e) => setResearch(e.target.value)}
+          className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2"
+        >
+          {RESEARCH_PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-ink/50">
+          The Agent SDK runs an autonomous web-research loop; it needs an ANTHROPIC_API_KEY on the
+          server, otherwise it falls back to Gemini grounding.
         </p>
       </div>
       {error && (

@@ -26,9 +26,13 @@ export async function POST(req: Request) {
     notes: typeof b.notes === "string" && b.notes ? b.notes : null,
   };
   const analysisModel = typeof b.analysisModel === "string" ? b.analysisModel : undefined;
+  const researchProvider = typeof b.researchProvider === "string" ? b.researchProvider : undefined;
 
   try {
-    const out = await runSwotAnalysis(input, analysisModel ? { analysisModel } : {});
+    const out = await runSwotAnalysis(input, {
+      ...(analysisModel ? { analysisModel } : {}),
+      ...(researchProvider ? { researchProvider } : {}),
+    });
     return NextResponse.json({
       companyId: out.companyId,
       analysisId: out.analysisId,

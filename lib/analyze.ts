@@ -11,7 +11,16 @@
 // Every step is Zod-validated and retried (max 2) with feedback on failure, and
 // every call is logged to llm_calls.
 
-import { GEMINI, AGENT, FLASH_MODEL, isAllowedAnalysisModel, researchProvider } from "./models";
+import {
+  GEMINI,
+  AGENT,
+  FLASH_MODEL,
+  agentAvailable,
+  isAllowedAnalysisModel,
+  isAllowedResearchProvider,
+  researchProvider,
+  type Provider,
+} from "./models";
 import { generateGrounded, generateStructured, sha256, GeminiError } from "./providers/gemini";
 import { researchWithAgent } from "./providers/agent";
 import { extractJsonObject } from "./extract-json";
@@ -51,9 +60,16 @@ export class AnalyzeError extends Error {
 async function research(
   input: CompanyInput,
   calls: CallTelemetry[],
-): Promise<{ findings: string; sources: Citation[] }> {
+  chosen: Provider,
+  fallbackNotes: string[],
+): Promise<{ findings: string; sources: Citation[]; usedProvider: Provider }> {
   const t0 = Date.now();
-  if (researchProvider() === "claude-agent") {
+  let provider = chosen;
+  if (provider === "claude-agent" && !agentAvailable()) {
+    fallbackNotes.push("Claude Agent SDK research needs an ANTHROPIC_API_KEY; used Gemini + Google Search instead.");
+    provider = "gemini";
+  }
+  if (provider === "claude-agent") {
     const prompt = researchTaskAgent(input);
     const r = await researchWithAgent({ system: CONSULTANT_SYSTEM, prompt });
     calls.push({
@@ -66,7 +82,7 @@ async function research(
       latencyMs: Date.now() - t0,
       attempts: 1,
     });
-    return { findings: r.findings, sources: r.citations };
+    return { findings: r.findings, sources: r.citations, usedProvider: "claude-agent" };
   }
   const prompt = researchTaskGemini(input);
   const r = await generateGrounded({ model: GEMINI.research, system: CONSULTANT_SYSTEM, prompt });
@@ -80,7 +96,7 @@ async function research(
     latencyMs: Date.now() - t0,
     attempts: 1,
   });
-  return { findings: r.text, sources: r.citations };
+  return { findings: r.text, sources: r.citations, usedProvider: "gemini" };
 }
 
 // --- generic structured step with schema+verify retry -----------------------
@@ -203,6 +219,8 @@ export interface AnalyzeOutput {
 export interface AnalyzeOptions {
   /** Analysis (SWOT) model chosen on the website; falls back to flash on quota. */
   analysisModel?: string;
+  /** Research provider chosen on the website; falls back to Gemini if the Agent SDK has no key. */
+  researchProvider?: string;
 }
 
 export async function runSwotAnalysis(
@@ -210,8 +228,13 @@ export async function runSwotAnalysis(
   opts: AnalyzeOptions = {},
 ): Promise<AnalyzeOutput> {
   const calls: CallTelemetry[] = [];
+  const fallbackNotes: string[] = [];
 
-  const { findings, sources } = await research(input, calls);
+  const chosenResearch =
+    opts.researchProvider && isAllowedResearchProvider(opts.researchProvider)
+      ? opts.researchProvider
+      : researchProvider();
+  const { findings, sources, usedProvider } = await research(input, calls, chosenResearch, fallbackNotes);
   const allowed = new Set(sources.map((s) => normalizeUrl(s.url)));
 
   const invented = (urls: string[]) =>
@@ -252,7 +275,6 @@ export async function runSwotAnalysis(
   // Auto-fallback: if the chosen model hits its quota (429), retry on flash so
   // the analysis still ships. The website exposes the choice; this is the safety net.
   let usedAnalysisModel = chosenAnalysis;
-  const fallbackNotes: string[] = [];
   let swotOut: { swot: Swot; notInData: string[] };
   try {
     swotOut = await runSwotStep(chosenAnalysis);
@@ -286,7 +308,7 @@ export async function runSwotAnalysis(
     ),
     notInData,
     provenance: {
-      researchProvider: researchProvider(),
+      researchProvider: usedProvider,
       analysisModel: usedAnalysisModel,
       extractModel: GEMINI.extract,
       generatedAt: new Date().toISOString(),
@@ -304,7 +326,7 @@ export async function runSwotAnalysis(
     research: RESEARCH_VERSION,
     extract: EXTRACT_VERSION,
     swot: SWOT_VERSION,
-    models: { analysis: usedAnalysisModel, extract: GEMINI.extract, research: researchProvider() === "claude-agent" ? AGENT.research : GEMINI.research },
+    models: { analysis: usedAnalysisModel, extract: GEMINI.extract, research: usedProvider === "claude-agent" ? AGENT.research : GEMINI.research },
   });
 
   const { companyId, analysisId } = saveAnalysis({

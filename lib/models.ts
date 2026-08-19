@@ -38,7 +38,22 @@ export function isAllowedAnalysisModel(x: string): boolean {
 
 export type Provider = "gemini" | "claude-agent";
 
-/** Which research provider will actually run, given the environment. */
+/** Research providers the website lets the user choose between. */
+export const RESEARCH_PROVIDERS = [
+  { id: "gemini", label: "Gemini + Google Search — free" },
+  { id: "claude-agent", label: "Claude Agent SDK — needs ANTHROPIC_API_KEY" },
+] as const;
+
+export function isAllowedResearchProvider(x: string): x is Provider {
+  return x === "gemini" || x === "claude-agent";
+}
+
+/** The Claude Agent SDK research path needs an Anthropic key to run. */
+export function agentAvailable(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/** Default research provider given the environment (Agent SDK if a key exists). */
 export function researchProvider(): Provider {
-  return process.env.ANTHROPIC_API_KEY ? "claude-agent" : "gemini";
+  return agentAvailable() ? "claude-agent" : "gemini";
 }
