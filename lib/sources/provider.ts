@@ -5,9 +5,11 @@
 // and rule 4 of the system prompt: "If a company data API tool is available,
 // call it before writing the profile; never write a profile from memory alone."
 //
-// One adapter file per provider implements this interface. v1 ships no concrete
-// adapter (returns null → the pipeline uses web research only); wiring one in is
-// a drop-in that immediately enriches the profile with cited registry facts.
+// One adapter file per provider implements this interface. The Probe42 adapter
+// is wired below (enabled when PROBE42_API_KEY is set); otherwise this returns
+// null and the pipeline uses web research only.
+
+import { makeProbe42Provider } from "./probe42";
 
 export interface RegistryFinancial {
   period: string; // e.g. "FY23"
@@ -35,8 +37,9 @@ export interface CompanyDataProvider {
 /**
  * Resolve the configured provider, or null when none is wired. A real adapter
  * (Probe42 / Tofler / SETU) is selected here by env, keeping the call site clean.
+ * Add more adapters by importing their factory and returning the first that
+ * resolves.
  */
 export function getCompanyDataProvider(): CompanyDataProvider | null {
-  // e.g. if (process.env.PROBE42_API_KEY) return new Probe42Provider();
-  return null;
+  return makeProbe42Provider();
 }

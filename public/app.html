@@ -440,7 +440,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     var parent = anchor.parentNode || document.body;
     if (!document.getElementById('cos-module')){
       parent.insertBefore(makeSelect('cos-module','Analysis module',
-        [['swot','SWOT analysis'],['growth','Growth opportunities (Ansoff)'],['valuechain','Value chain diagnostic'],['memo',"Consultant's memo"]],
+        [['swot','SWOT analysis'],['growth','Growth opportunities (Ansoff)'],['valuechain','Value chain diagnostic'],['competition','Competitive radar'],['memo',"Consultant's memo"]],
         'SWOT, an Ansoff growth map, a value-chain diagnostic, or a one-page memo.'), anchor);
     }
     if (!document.getElementById('cos-research')){

@@ -88,6 +88,18 @@ The unit tests are the spec's stated first priority ("unit-test the sanity-check
 
 ---
 
+## Modules & watchlists
+
+Five analysis modules, all on the same research → extract → **VERIFY** spine, chosen per analysis:
+
+- **SWOT** · **Growth (Ansoff)** — scored, priority-ranked, scenario ranges, projection sanity · **Value chain** — steps, leaks, biggest-leak · **Competitive radar** — direct/indirect/emerging, incumbent-copy + channel-power threats, recent M&A · **Consultant's memo** — Pyramid Principle.
+
+**Competitor watchlists (weekly diff digest).** `POST /api/watchlist` creates an anonymous, token-identified watchlist for a company (or use "Track weekly" on any report). Each run captures recent market signals (funding / launch / leadership / M&A / news) via grounded search + structured extract, and the digest is the **diff vs the previous snapshot** — only what's new. View at `/watchlist/[token]`, "Check now" to run on demand.
+
+Schedule the weekly job by POSTing to `/api/cron/watchlist` with an `x-cron-secret: $CRON_SECRET` header — via a **Render Cron Job** or a scheduled **GitHub Action** (weekly cron). It refreshes every watchlist due for a run.
+
+**Company-data providers.** `CompanyDataProvider` (`lib/sources/`) abstracts MCA/RoC data; the **Probe42** adapter activates when `PROBE42_API_KEY` is set, enriching the profile with cited registry facts *before* analysis (verify its field paths against Probe42's authenticated docs). No key → web research only.
+
 ## Architecture
 
 ```

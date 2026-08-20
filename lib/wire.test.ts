@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { toGrowth, toMemo, toValueChain, toCompanyProfile, toSwot } from "./wire";
-import { GrowthResultSchema, MemoResultSchema, ValueChainResultSchema } from "./schemas";
+import { toGrowth, toMemo, toValueChain, toCompetition, toCompanyProfile, toSwot } from "./wire";
+import { GrowthResultSchema, MemoResultSchema, ValueChainResultSchema, CompetitionResultSchema } from "./schemas";
 
 describe("toGrowth", () => {
   const raw = {
@@ -193,6 +193,41 @@ describe("toValueChain", () => {
       module: "valuechain",
       company: toCompanyProfile({ name: "Acme", oneLiner: "x", facts: [], financialsStatus: "unavailable" }),
       valueChain: { steps, biggestLeak: steps[0]!.step },
+      sources: [],
+      confidence: { coveragePct: 50, sourceCount: 1, mostRecentSourceDaysAgo: null, band: "medium" },
+      notInData: [],
+      provenance: { researchProvider: "gemini", analysisModel: "m", extractModel: "e", generatedAt: "t" },
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("toCompetition", () => {
+  const raw = {
+    competitors: [
+      { name: "Swiggy", type: "direct", positioning: "Larger delivery network", threat: "high", evidenceKind: "citation", sourceUrl: "https://example.com/a", sourceTitle: "S", confidence: "medium" },
+      { name: "ONDC", type: "emerging", positioning: "Open network undercutting take rates", threat: "medium", evidenceKind: "assumption", assumptionNote: "policy signal", confidence: "low" },
+    ],
+    incumbentThreat: "A large FMCG player launches its own delivery app.",
+    channelPowerThreat: "App-store and payments rails raise rents.",
+    recentMA: null,
+    notInData: ["private competitor financials"],
+  };
+  it("classifies competitors and carries the required structural threats", () => {
+    const c = toCompetition(raw);
+    expect(c.competitors).toHaveLength(2);
+    expect(c.competitors[0]!.type).toBe("direct");
+    expect(c.competitors[1]!.evidence.kind).toBe("assumption");
+    expect(c.incumbentThreat).toMatch(/FMCG/);
+    expect(c.channelPowerThreat).toMatch(/rails/);
+    expect(c.recentMA).toBeNull();
+  });
+  it("validates against CompetitionResultSchema", () => {
+    const c = toCompetition(raw);
+    const r = CompetitionResultSchema.safeParse({
+      module: "competition",
+      company: toCompanyProfile({ name: "Acme", oneLiner: "x", facts: [], financialsStatus: "unavailable" }),
+      competition: { competitors: c.competitors, incumbentThreat: c.incumbentThreat, channelPowerThreat: c.channelPowerThreat, recentMA: c.recentMA },
       sources: [],
       confidence: { coveragePct: 50, sourceCount: 1, mostRecentSourceDaysAgo: null, band: "medium" },
       notInData: [],

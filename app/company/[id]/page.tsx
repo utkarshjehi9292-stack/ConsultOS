@@ -1,6 +1,8 @@
 import { getLatestAnalysis } from "../../../db/store";
+import { TrackButton } from "./track-button";
 import type {
   Claim,
+  CompetitionResult,
   GrowthResult,
   MemoResult,
   Opportunity,
@@ -23,6 +25,7 @@ const MODULE_LABEL: Record<StoredResult["module"], string> = {
   growth: "Growth opportunities",
   memo: "Consultant's memo",
   valuechain: "Value chain diagnostic",
+  competition: "Competitive radar",
 };
 
 export default async function CompanyPage({ params }: { params: Promise<{ id: string }> }) {
@@ -44,7 +47,10 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
   return (
     <main className="mx-auto max-w-3xl px-5 py-12">
       <header className="border-b border-line pb-6">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-fact">{MODULE_LABEL[result.module]}</p>
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-fact">{MODULE_LABEL[result.module]}</p>
+          <TrackButton companyName={company.name} />
+        </div>
         <h1 className="mt-1 font-serif text-3xl leading-tight text-ink">{company.name}</h1>
         <p className="mt-2 text-ink/70">{company.oneLiner}</p>
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink/60">
@@ -84,6 +90,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
       {result.module === "growth" && <GrowthView growth={result.growth} facts={company.facts} />}
       {result.module === "memo" && <MemoView memo={result.memo} />}
       {result.module === "valuechain" && <ValueChainView vc={result.valueChain} />}
+      {result.module === "competition" && <CompetitionView c={result.competition} />}
 
       {notInData.length > 0 && (
         <section className="mt-10 rounded-md border border-line bg-white p-4">
@@ -266,6 +273,55 @@ function ValueChainView({ vc }: { vc: ValueChainResult["valueChain"] }) {
             </div>
           </article>
         ))}
+      </div>
+    </section>
+  );
+}
+
+// --- Competitive Radar -------------------------------------------------------
+
+function CompetitionView({ c }: { c: CompetitionResult["competition"] }) {
+  const typeColor = (t: string) =>
+    t === "direct" ? "text-flag" : t === "emerging" ? "text-reading" : "text-ink/50";
+  const byType = (t: string) => c.competitors.filter((x) => x.type === t);
+  return (
+    <section className="mt-8">
+      <h2 className="font-serif text-xl text-ink">Competitive radar</h2>
+      {(["direct", "indirect", "emerging"] as const).map((t) =>
+        byType(t).length === 0 ? null : (
+          <div key={t} className="mt-4">
+            <h3 className={`text-sm font-medium uppercase tracking-wide ${typeColor(t)}`}>{t}</h3>
+            <div className="mt-2 space-y-2">
+              {byType(t).map((comp, i) => (
+                <article key={i} className="rounded-md border border-line bg-white p-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <h4 className="font-medium text-ink">{comp.name}</h4>
+                    <span className="text-xs text-ink/50">threat: {comp.threat}</span>
+                  </div>
+                  <div className="mt-1">
+                    <ClaimRow claim={{ statement: comp.positioning, evidence: comp.evidence, confidence: comp.confidence }} inline />
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        ),
+      )}
+      <div className="mt-5 space-y-2 rounded-md border border-line bg-white p-4 text-sm">
+        <p>
+          <span className="font-medium text-ink">Incumbent-copy threat:</span>{" "}
+          <span className="text-ink/80">{c.incumbentThreat ?? "None identified in sources."}</span>
+        </p>
+        <p>
+          <span className="font-medium text-ink">Platform/channel-power threat:</span>{" "}
+          <span className="text-ink/80">{c.channelPowerThreat ?? "None identified in sources."}</span>
+        </p>
+        {c.recentMA && (
+          <p>
+            <span className="font-medium text-ink">Recent M&amp;A repricing the space:</span>{" "}
+            <span className="text-ink/80">{c.recentMA}</span>
+          </p>
+        )}
       </div>
     </section>
   );

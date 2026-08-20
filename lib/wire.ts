@@ -8,12 +8,14 @@
 
 import {
   CompanyProfileSchema,
+  CompetitorSchema,
   MemoSchema,
   OpportunitySchema,
   SwotSchema,
   ValueChainStepSchema,
   type Claim,
   type CompanyProfile,
+  type Competitor,
   type Memo,
   type Opportunity,
   type Swot,
@@ -395,4 +397,71 @@ export function toValueChain(raw: unknown): { steps: ValueChainStep[]; notInData
   const steps = arr(v.steps).map(mapValueChainStep);
   const notInData = arr(v.notInData).map(str).filter((x) => x.length > 0);
   return { steps, notInData };
+}
+
+// --- Competitive Radar (Milestone 3) ----------------------------------------
+
+export const geminiCompetitionSchema: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    competitors: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          type: { type: "string", enum: ["direct", "indirect", "emerging"] },
+          positioning: { type: "string" },
+          threat: { type: "string", enum: ["high", "medium", "low"] },
+          evidenceKind: { type: "string", enum: ["citation", "assumption"] },
+          sourceUrl: { type: "string", nullable: true },
+          sourceTitle: { type: "string", nullable: true },
+          assumptionNote: { type: "string", nullable: true },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+        },
+        required: ["name", "type", "positioning", "threat", "evidenceKind", "confidence"],
+      },
+    },
+    incumbentThreat: { type: "string", nullable: true },
+    channelPowerThreat: { type: "string", nullable: true },
+    recentMA: { type: "string", nullable: true },
+    notInData: { type: "array", items: { type: "string" } },
+  },
+  required: ["competitors"],
+};
+
+function mapCompetitor(raw: unknown): Competitor {
+  const c = obj(raw);
+  const kind = str(c.evidenceKind) === "assumption" ? "assumption" : "citation";
+  const evidence =
+    kind === "citation"
+      ? { kind: "citation" as const, url: str(c.sourceUrl), title: strOrNull(c.sourceTitle) ?? str(c.sourceUrl), quote: null }
+      : { kind: "assumption" as const, note: strOrNull(c.assumptionNote) ?? "inference from the market" };
+  const typeRaw = str(c.type);
+  const type = (["direct", "indirect", "emerging"].includes(typeRaw) ? typeRaw : "direct") as Competitor["type"];
+  return CompetitorSchema.parse({
+    name: str(c.name),
+    type,
+    positioning: str(c.positioning) || "unstated",
+    threat: conf(c.threat),
+    evidence,
+    confidence: conf(c.confidence),
+  });
+}
+
+export function toCompetition(raw: unknown): {
+  competitors: Competitor[];
+  incumbentThreat: string | null;
+  channelPowerThreat: string | null;
+  recentMA: string | null;
+  notInData: string[];
+} {
+  const c = obj(raw);
+  return {
+    competitors: arr(c.competitors).map(mapCompetitor),
+    incumbentThreat: strOrNull(c.incumbentThreat),
+    channelPowerThreat: strOrNull(c.channelPowerThreat),
+    recentMA: strOrNull(c.recentMA),
+    notInData: arr(c.notInData).map(str).filter((x) => x.length > 0),
+  };
 }

@@ -51,6 +51,29 @@ export const llmCalls = sqliteTable("llm_calls", {
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
+// --- Milestone 3: competitor watchlists + weekly diff digest ----------------
+
+export const watchlists = sqliteTable("watchlists", {
+  token: text("token").primaryKey(), // anonymous, URL-safe (no auth in v1)
+  companyName: text("company_name").notNull(),
+  cin: text("cin"),
+  note: text("note"),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+  lastRunAt: integer("last_run_at"),
+});
+
+export const watchlistSnapshots = sqliteTable("watchlist_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  watchlistToken: text("watchlist_token")
+    .notNull()
+    .references(() => watchlists.token),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+  signalsJson: text("signals_json").notNull(), // Signal[] captured this run
+  addedJson: text("added_json").notNull(), // the diff vs previous run (the digest)
+});
+
 export type CompanyRow = typeof companies.$inferSelect;
 export type AnalysisRow = typeof analyses.$inferSelect;
 export type LlmCallRow = typeof llmCalls.$inferSelect;
+export type WatchlistRow = typeof watchlists.$inferSelect;
+export type WatchlistSnapshotRow = typeof watchlistSnapshots.$inferSelect;

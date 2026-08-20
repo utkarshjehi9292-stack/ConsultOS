@@ -240,5 +240,39 @@ export const ValueChainResultSchema = z.object({
 });
 export type ValueChainResult = z.infer<typeof ValueChainResultSchema>;
 
+// --- Milestone 3: Competitive Radar -----------------------------------------
+
+export const CompetitorSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(["direct", "indirect", "emerging"]),
+  positioning: z.string().min(1), // how they sit / how they win (steelmanned)
+  threat: Confidence, // threat level: high | medium | low
+  evidence: EvidenceSchema,
+  confidence: Confidence,
+});
+export type Competitor = z.infer<typeof CompetitorSchema>;
+
+export const CompetitionResultSchema = z.object({
+  module: z.literal("competition"),
+  company: CompanyProfileSchema,
+  competition: z.object({
+    competitors: z.array(CompetitorSchema).default([]),
+    // Spec: always include an incumbent-copying-the-model threat and a platform/channel-power threat.
+    incumbentThreat: z.string().nullable(),
+    channelPowerThreat: z.string().nullable(),
+    recentMA: z.string().nullable(), // recent M&A that reprices the space
+  }),
+  sources: z.array(CitationSchema).default([]),
+  confidence: ModuleConfidenceSchema,
+  notInData: z.array(z.string()).default([]),
+  provenance: ProvenanceSchema,
+});
+export type CompetitionResult = z.infer<typeof CompetitionResultSchema>;
+
 /** Any stored module result (the report page branches on `module`). */
-export type StoredResult = AnalysisResult | GrowthResult | MemoResult | ValueChainResult;
+export type StoredResult =
+  | AnalysisResult
+  | GrowthResult
+  | MemoResult
+  | ValueChainResult
+  | CompetitionResult;

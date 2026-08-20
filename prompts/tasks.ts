@@ -18,6 +18,21 @@ export const SWOT_VERSION = "swot@1";
 export const GROWTH_VERSION = "growth@1";
 export const MEMO_VERSION = "memo@1";
 export const VALUECHAIN_VERSION = "valuechain@1";
+export const COMPETITION_VERSION = "competition@1";
+export const SIGNALS_VERSION = "signals@1";
+
+/** Grounded search for recent market signals (watchlist digest). */
+export function signalsSearchTask(companyName: string): string {
+  return `Search the web for RECENT developments about "${companyName}" — in roughly the last 30–45 days. Look for: funding rounds, product launches, leadership changes, mergers/acquisitions, and material news. For each, note what happened, the date if given, and the source. Be strictly factual; skip anything you can't attribute to a source.`;
+}
+
+/** Extract the searched text into a structured signal list (JSON mode). */
+export function signalsExtractTask(companyName: string, searched: string): string {
+  return `From the briefing below about "${companyName}", extract each distinct recent development as a signal: a short factual headline, a category (funding | launch | leadership | mna | news | other), the date if stated, and the source URL if present. Only include items actually supported by the briefing.
+
+BRIEFING:
+${searched}`;
+}
 
 function companyLine(input: CompanyInput): string {
   const bits = [`Company: ${input.name}`];
@@ -146,6 +161,33 @@ STRUCTURE (fill the fields):
 - confidenceOutOf10: your honest confidence 0–10, given the sources.
 
 Write like a sharp colleague. No filler. A founder should be able to forward it without editing.
+
+AVAILABLE SOURCES (cite by exact URL):
+${sourceList(sources)}
+
+COMPANY PROFILE (JSON):
+${profileJson}
+
+RESEARCH FINDINGS:
+${findings}`;
+}
+
+/** Competitive Radar — classify competitors, flag structural threats, recent M&A. Gemini JSON mode. */
+export function competitionTask(
+  input: CompanyInput,
+  profileJson: string,
+  findings: string,
+  sources: Citation[],
+): string {
+  return `Map the competitive landscape for "${input.name}". Search for current competitors, funding, launches, and M&A before asserting the state of the market.
+
+STANDARDS:
+- List competitors and classify each as direct, indirect, or emerging (set "type").
+- For each, describe positioning — steelman how they win, not a strawman — and a threat level (high/medium/low).
+- REQUIRED: fill incumbentThreat with the strongest "an incumbent copies this model" threat, and channelPowerThreat with the strongest "a platform/channel that controls distribution squeezes us" threat. If genuinely none, say so explicitly in that field.
+- recentMA: note any recent M&A that reprices the space; null if none found.
+- Cite or flag every competitor: evidenceKind="citation" with a sourceUrl from the list, or "assumption" with an assumptionNote.
+- Put anything you could not determine into notInData.
 
 AVAILABLE SOURCES (cite by exact URL):
 ${sourceList(sources)}

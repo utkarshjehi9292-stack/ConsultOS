@@ -57,8 +57,24 @@ export function getDb(): ReturnType<typeof drizzle> {
     attempts INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
+  CREATE TABLE IF NOT EXISTS watchlists (
+    token TEXT PRIMARY KEY,
+    company_name TEXT NOT NULL,
+    cin TEXT,
+    note TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    last_run_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS watchlist_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    watchlist_token TEXT NOT NULL REFERENCES watchlists(token),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    signals_json TEXT NOT NULL,
+    added_json TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_analyses_company ON analyses(company_id);
   CREATE INDEX IF NOT EXISTS idx_llm_calls_analysis ON llm_calls(analysis_id);
+  CREATE INDEX IF NOT EXISTS idx_snapshots_watchlist ON watchlist_snapshots(watchlist_token);
 `);
   _db = drizzle(sqlite, { schema });
   return _db;

@@ -31,11 +31,13 @@ import {
   toGrowth,
   toMemo,
   toValueChain,
+  toCompetition,
   geminiProfileSchema,
   geminiSwotSchema,
   geminiGrowthSchema,
   geminiMemoSchema,
   geminiValueChainSchema,
+  geminiCompetitionSchema,
 } from "./wire";
 import {
   computeModuleConfidence,
@@ -58,6 +60,8 @@ import type {
   Swot,
   ValueChainResult,
   ValueChainStep,
+  CompetitionResult,
+  Competitor,
 } from "./schemas";
 import { addUsage, ZERO_USAGE, type CallTelemetry, type Usage } from "./telemetry";
 import { CONSULTANT_SYSTEM, CONSULTANT_SYSTEM_VERSION } from "../prompts/system";
@@ -68,10 +72,12 @@ import {
   GROWTH_VERSION,
   MEMO_VERSION,
   VALUECHAIN_VERSION,
+  COMPETITION_VERSION,
   extractTask,
   growthTask,
   memoTask,
   valueChainTask,
+  competitionTask,
   researchTaskAgent,
   researchTaskGemini,
   swotTask,
@@ -258,7 +264,7 @@ export interface AnalyzeOutput {
   lowConfidence: boolean;
 }
 
-type ModuleType = "swot" | "growth" | "memo" | "valuechain";
+type ModuleType = "swot" | "growth" | "memo" | "valuechain" | "competition";
 
 function persist(
   input: CompanyInput,
@@ -557,4 +563,57 @@ export async function runValueChainAnalysis(input: CompanyInput, opts: AnalyzeOp
   };
 
   return persist(input, result, "valuechain", modelVersionOf("valuechain", usedModel, g.usedProvider, VALUECHAIN_VERSION), g.calls);
+}
+
+// --- Module 5: Competitive Radar (Milestone 3) ------------------------------
+
+export async function runCompetitionAnalysis(input: CompanyInput, opts: AnalyzeOptions = {}): Promise<AnalyzeOutput> {
+  const g = await gather(input, opts);
+
+  const { value: compOut, usedModel } = await analysisStep(opts, g.fallbackNotes, (model) =>
+    structuredStep<{
+      competitors: Competitor[];
+      incumbentThreat: string | null;
+      channelPowerThreat: string | null;
+      recentMA: string | null;
+      notInData: string[];
+    }>({
+      stage: "competition",
+      model,
+      buildPrompt: (fb) => {
+        const base = competitionTask(input, JSON.stringify(g.profile, null, 2), g.findings, g.sources);
+        return fb ? `${base}\n\n${fb}` : base;
+      },
+      responseSchema: geminiCompetitionSchema,
+      map: toCompetition,
+      check: ({ competitors }) =>
+        g.invented(
+          competitors.filter((c) => c.evidence.kind === "citation").map((c) => (c.evidence as { url: string }).url),
+        ),
+      calls: g.calls,
+    }),
+  );
+
+  const competitors = compOut.competitors.map((c) => {
+    const clean = sanitizeClaim({ statement: c.positioning, evidence: c.evidence, confidence: c.confidence }, g.allowed);
+    return { ...c, evidence: clean.evidence, confidence: clean.confidence };
+  });
+  const claims: Claim[] = competitors.map((c) => ({ statement: c.positioning, evidence: c.evidence, confidence: c.confidence }));
+
+  const result: CompetitionResult = {
+    module: "competition",
+    company: g.profile,
+    competition: {
+      competitors,
+      incumbentThreat: compOut.incumbentThreat,
+      channelPowerThreat: compOut.channelPowerThreat,
+      recentMA: compOut.recentMA,
+    },
+    sources: g.sources,
+    confidence: computeModuleConfidence(claims, g.sources, Date.now()),
+    notInData: [...compOut.notInData, ...g.fallbackNotes],
+    provenance: provenanceOf(g.usedProvider, usedModel),
+  };
+
+  return persist(input, result, "competition", modelVersionOf("competition", usedModel, g.usedProvider, COMPETITION_VERSION), g.calls);
 }

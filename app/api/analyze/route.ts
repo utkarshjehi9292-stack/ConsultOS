@@ -4,6 +4,7 @@ import {
   runGrowthAnalysis,
   runMemoAnalysis,
   runValueChainAnalysis,
+  runCompetitionAnalysis,
   AnalyzeError,
 } from "../../../lib/analyze";
 import { GeminiError } from "../../../lib/providers/gemini";
@@ -14,10 +15,11 @@ const RUNNERS = {
   growth: runGrowthAnalysis,
   memo: runMemoAnalysis,
   valuechain: runValueChainAnalysis,
+  competition: runCompetitionAnalysis,
 } as const;
 type ModuleKey = keyof typeof RUNNERS;
 function isModule(x: unknown): x is ModuleKey {
-  return x === "swot" || x === "growth" || x === "memo" || x === "valuechain";
+  return x === "swot" || x === "growth" || x === "memo" || x === "valuechain" || x === "competition";
 }
 
 export const runtime = "nodejs";
