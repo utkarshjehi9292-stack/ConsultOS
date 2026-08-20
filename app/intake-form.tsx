@@ -15,6 +15,7 @@ const RESEARCH_PROVIDERS = [
 const MODULES = [
   { id: "swot", label: "SWOT analysis" },
   { id: "growth", label: "Growth opportunities (Ansoff)" },
+  { id: "valuechain", label: "Value chain diagnostic" },
   { id: "memo", label: "Consultant's memo" },
 ];
 

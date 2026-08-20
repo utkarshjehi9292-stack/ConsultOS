@@ -23,16 +23,19 @@ import {
 } from "./models";
 import { generateGrounded, generateStructured, sha256, GeminiError } from "./providers/gemini";
 import { researchWithAgent } from "./providers/agent";
+import { getCompanyDataProvider } from "./sources/provider";
 import { extractJsonObject } from "./extract-json";
 import {
   toCompanyProfile,
   toSwot,
   toGrowth,
   toMemo,
+  toValueChain,
   geminiProfileSchema,
   geminiSwotSchema,
   geminiGrowthSchema,
   geminiMemoSchema,
+  geminiValueChainSchema,
 } from "./wire";
 import {
   computeModuleConfidence,
@@ -53,6 +56,8 @@ import type {
   Opportunity,
   StoredResult,
   Swot,
+  ValueChainResult,
+  ValueChainStep,
 } from "./schemas";
 import { addUsage, ZERO_USAGE, type CallTelemetry, type Usage } from "./telemetry";
 import { CONSULTANT_SYSTEM, CONSULTANT_SYSTEM_VERSION } from "../prompts/system";
@@ -62,9 +67,11 @@ import {
   SWOT_VERSION,
   GROWTH_VERSION,
   MEMO_VERSION,
+  VALUECHAIN_VERSION,
   extractTask,
   growthTask,
   memoTask,
+  valueChainTask,
   researchTaskAgent,
   researchTaskGemini,
   swotTask,
@@ -251,7 +258,7 @@ export interface AnalyzeOutput {
   lowConfidence: boolean;
 }
 
-type ModuleType = "swot" | "growth" | "memo";
+type ModuleType = "swot" | "growth" | "memo" | "valuechain";
 
 function persist(
   input: CompanyInput,
@@ -291,7 +298,29 @@ async function gather(input: CompanyInput, opts: AnalyzeOptions): Promise<Gather
     opts.researchProvider && isAllowedResearchProvider(opts.researchProvider)
       ? opts.researchProvider
       : researchProvider();
-  const { findings, sources, usedProvider } = await research(input, calls, chosenResearch, fallbackNotes);
+  const web = await research(input, calls, chosenResearch, fallbackNotes);
+  const usedProvider = web.usedProvider;
+
+  // Registry data first (rule 4): if a CompanyDataProvider is wired, its cited
+  // facts are prepended to findings and its URL added as a citable source.
+  let findings = web.findings;
+  let sources = web.sources;
+  const registry = getCompanyDataProvider();
+  if (registry) {
+    try {
+      const reg = await registry.lookup({ name: input.name, cin: input.cin ?? null });
+      if (reg) {
+        findings = `REGISTRY DATA (from ${registry.name}, authoritative):\n${JSON.stringify(reg)}\n\n${findings}`;
+        sources = [
+          ...sources,
+          { url: reg.sourceUrl, title: `${registry.name} registry record`, publisher: registry.name, date: null },
+        ];
+      }
+    } catch {
+      fallbackNotes.push(`Company-data provider ${registry.name} lookup failed; used web research only.`);
+    }
+  }
+
   const allowed = new Set(sources.map((s) => normalizeUrl(s.url)));
   const invented = (urls: string[]) =>
     urls.filter((u) => !allowed.has(normalizeUrl(u))).map((u) => `Cited URL not in provided sources: ${u}`);
@@ -484,4 +513,48 @@ export async function runMemoAnalysis(input: CompanyInput, opts: AnalyzeOptions 
   };
 
   return persist(input, result, "memo", modelVersionOf("memo", usedModel, g.usedProvider, MEMO_VERSION), g.calls);
+}
+
+// --- Module 4: Value Chain Diagnostics (Milestone 3) ------------------------
+
+export async function runValueChainAnalysis(input: CompanyInput, opts: AnalyzeOptions = {}): Promise<AnalyzeOutput> {
+  const g = await gather(input, opts);
+
+  const { value: vcOut, usedModel } = await analysisStep(opts, g.fallbackNotes, (model) =>
+    structuredStep<{ steps: ValueChainStep[]; notInData: string[] }>({
+      stage: "valuechain",
+      model,
+      buildPrompt: (fb) => {
+        const base = valueChainTask(input, JSON.stringify(g.profile, null, 2), g.findings, g.sources);
+        return fb ? `${base}\n\n${fb}` : base;
+      },
+      responseSchema: geminiValueChainSchema,
+      map: toValueChain,
+      check: ({ steps }) =>
+        g.invented(steps.filter((s) => s.evidence.kind === "citation").map((s) => (s.evidence as { url: string }).url)),
+      calls: g.calls,
+    }),
+  );
+
+  const steps = vcOut.steps.map((s) => {
+    const clean = sanitizeClaim({ statement: s.likelyLeak, evidence: s.evidence, confidence: s.confidence }, g.allowed);
+    return { ...s, evidence: clean.evidence, confidence: clean.confidence };
+  });
+  // Biggest leak = the highest-significance step (code-chosen, not model-claimed).
+  const rank = { high: 3, medium: 2, low: 1 } as const;
+  const biggest = steps.slice().sort((a, b) => rank[b.significance] - rank[a.significance])[0];
+  const biggestLeak = biggest ? biggest.step : null;
+  const claims: Claim[] = steps.map((s) => ({ statement: s.likelyLeak, evidence: s.evidence, confidence: s.confidence }));
+
+  const result: ValueChainResult = {
+    module: "valuechain",
+    company: g.profile,
+    valueChain: { steps, biggestLeak },
+    sources: g.sources,
+    confidence: computeModuleConfidence(claims, g.sources, Date.now()),
+    notInData: [...vcOut.notInData, ...g.fallbackNotes],
+    provenance: provenanceOf(g.usedProvider, usedModel),
+  };
+
+  return persist(input, result, "valuechain", modelVersionOf("valuechain", usedModel, g.usedProvider, VALUECHAIN_VERSION), g.calls);
 }

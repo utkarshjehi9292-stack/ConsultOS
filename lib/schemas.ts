@@ -214,5 +214,31 @@ export const MemoResultSchema = z.object({
 });
 export type MemoResult = z.infer<typeof MemoResultSchema>;
 
+// --- Milestone 3: Value Chain Diagnostics -----------------------------------
+
+export const ValueChainStepSchema = z.object({
+  step: z.string().min(1), // an actual step for THIS company, not a generic template
+  performedBy: z.string().min(1), // in-house / named partner / platform
+  significance: Confidence, // margin/cost significance: high | medium | low
+  likelyLeak: z.string().min(1), // the most likely margin leak or bottleneck
+  evidence: EvidenceSchema, // the evidence or assumption behind the leak
+  confidence: Confidence,
+});
+export type ValueChainStep = z.infer<typeof ValueChainStepSchema>;
+
+export const ValueChainResultSchema = z.object({
+  module: z.literal("valuechain"),
+  company: CompanyProfileSchema,
+  valueChain: z.object({
+    steps: z.array(ValueChainStepSchema).default([]),
+    biggestLeak: z.string().nullable(), // step name of the largest leak — code-chosen
+  }),
+  sources: z.array(CitationSchema).default([]),
+  confidence: ModuleConfidenceSchema,
+  notInData: z.array(z.string()).default([]),
+  provenance: ProvenanceSchema,
+});
+export type ValueChainResult = z.infer<typeof ValueChainResultSchema>;
+
 /** Any stored module result (the report page branches on `module`). */
-export type StoredResult = AnalysisResult | GrowthResult | MemoResult;
+export type StoredResult = AnalysisResult | GrowthResult | MemoResult | ValueChainResult;

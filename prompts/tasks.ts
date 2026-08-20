@@ -17,6 +17,7 @@ export const EXTRACT_VERSION = "extract@1";
 export const SWOT_VERSION = "swot@1";
 export const GROWTH_VERSION = "growth@1";
 export const MEMO_VERSION = "memo@1";
+export const VALUECHAIN_VERSION = "valuechain@1";
 
 function companyLine(input: CompanyInput): string {
   const bits = [`Company: ${input.name}`];
@@ -145,6 +146,32 @@ STRUCTURE (fill the fields):
 - confidenceOutOf10: your honest confidence 0–10, given the sources.
 
 Write like a sharp colleague. No filler. A founder should be able to forward it without editing.
+
+AVAILABLE SOURCES (cite by exact URL):
+${sourceList(sources)}
+
+COMPANY PROFILE (JSON):
+${profileJson}
+
+RESEARCH FINDINGS:
+${findings}`;
+}
+
+/** Value Chain Diagnostics — map THIS company's actual steps, flag leaks. Gemini JSON mode. */
+export function valueChainTask(
+  input: CompanyInput,
+  profileJson: string,
+  findings: string,
+  sources: Citation[],
+): string {
+  return `Map the value chain for "${input.name}" and diagnose where margin leaks.
+
+STANDARDS:
+- Map the ACTUAL steps for THIS company from its business model — not a generic textbook chain. Order them from upstream to downstream (e.g. sourcing → production → distribution → sales → support, adapted to what this company actually does).
+- For each step: who performs it (performedBy: in-house, a named partner, or a platform), its margin/cost significance (high/medium/low), and the single most likely margin leak or bottleneck at that step (likelyLeak).
+- Cite or flag every step's leak: evidenceKind="citation" with a sourceUrl from the list, or "assumption" with an assumptionNote (most leak diagnoses are inferences — mark them as assumptions at medium/low confidence).
+- Do NOT pick the biggest leak — the system flags the highest-significance step.
+- Put anything you could not determine into notInData.
 
 AVAILABLE SOURCES (cite by exact URL):
 ${sourceList(sources)}

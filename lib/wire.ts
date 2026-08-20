@@ -11,11 +11,13 @@ import {
   MemoSchema,
   OpportunitySchema,
   SwotSchema,
+  ValueChainStepSchema,
   type Claim,
   type CompanyProfile,
   type Memo,
   type Opportunity,
   type Swot,
+  type ValueChainStep,
 } from "./schemas";
 
 // --- Gemini responseSchema objects (guide generation) ------------------------
@@ -336,4 +338,61 @@ export function toMemo(raw: unknown): Memo {
     dataQualityNote: strOrNull(m.dataQualityNote),
     confidenceOutOf10: Math.max(0, Math.min(10, num(m.confidenceOutOf10))),
   });
+}
+
+// --- Value Chain Diagnostics (Milestone 3) ----------------------------------
+
+export const geminiValueChainSchema: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    steps: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          step: { type: "string" },
+          performedBy: { type: "string" },
+          significance: { type: "string", enum: ["high", "medium", "low"] },
+          likelyLeak: { type: "string" },
+          evidenceKind: { type: "string", enum: ["citation", "assumption"] },
+          sourceUrl: { type: "string", nullable: true },
+          sourceTitle: { type: "string", nullable: true },
+          assumptionNote: { type: "string", nullable: true },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+        },
+        required: ["step", "performedBy", "significance", "likelyLeak", "evidenceKind", "confidence"],
+      },
+    },
+    notInData: { type: "array", items: { type: "string" } },
+  },
+  required: ["steps"],
+};
+
+function conf(v: unknown): "high" | "medium" | "low" {
+  const s = str(v);
+  return (["high", "medium", "low"].includes(s) ? s : "low") as "high" | "medium" | "low";
+}
+
+function mapValueChainStep(raw: unknown): ValueChainStep {
+  const s = obj(raw);
+  const kind = str(s.evidenceKind) === "assumption" ? "assumption" : "citation";
+  const evidence =
+    kind === "citation"
+      ? { kind: "citation" as const, url: str(s.sourceUrl), title: strOrNull(s.sourceTitle) ?? str(s.sourceUrl), quote: null }
+      : { kind: "assumption" as const, note: strOrNull(s.assumptionNote) ?? "inference from the business model" };
+  return ValueChainStepSchema.parse({
+    step: str(s.step),
+    performedBy: str(s.performedBy) || "unstated",
+    significance: conf(s.significance),
+    likelyLeak: str(s.likelyLeak) || "unstated",
+    evidence,
+    confidence: conf(s.confidence),
+  });
+}
+
+export function toValueChain(raw: unknown): { steps: ValueChainStep[]; notInData: string[] } {
+  const v = obj(raw);
+  const steps = arr(v.steps).map(mapValueChainStep);
+  const notInData = arr(v.notInData).map(str).filter((x) => x.length > 0);
+  return { steps, notInData };
 }

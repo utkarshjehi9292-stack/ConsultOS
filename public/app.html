@@ -440,13 +440,13 @@ document.addEventListener('DOMContentLoaded', async function() {
     var parent = anchor.parentNode || document.body;
     if (!document.getElementById('cos-module')){
       parent.insertBefore(makeSelect('cos-module','Analysis module',
-        [['swot','SWOT analysis'],['growth','Growth opportunities (Ansoff)'],['memo',"Consultant's memo"]],
-        'SWOT, an Ansoff growth-opportunity map, or a one-page Pyramid-Principle memo.'), anchor);
+        [['swot','SWOT analysis'],['growth','Growth opportunities (Ansoff)'],['valuechain','Value chain diagnostic'],['memo',"Consultant's memo"]],
+        'SWOT, an Ansoff growth map, a value-chain diagnostic, or a one-page memo.'), anchor);
     }
     if (!document.getElementById('cos-research')){
       parent.insertBefore(makeSelect('cos-research','Research provider',
         [['gemini','Gemini + Google Search — free'],['claude-agent','Claude Agent SDK — needs ANTHROPIC_API_KEY']],
-        'Agent SDK runs an autonomous web-research loop; falls back to Gemini grounding if no Anthropic key is set.'), anchor);
+        'Agent SDK runs an autonomous web-research loop; falls back to Gemini grounding if no Anthropic key/credit.'), anchor);
     }
   }
   function pick(id, dflt){ var s=document.getElementById(id); return (s && s.value) || dflt; }

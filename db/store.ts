@@ -11,7 +11,7 @@ import type { CompanyInput } from "../prompts/tasks";
 export interface SaveInput {
   input: CompanyInput;
   result: StoredResult;
-  type: "swot" | "growth" | "memo";
+  type: "swot" | "growth" | "memo" | "valuechain";
   modelVersion: string;
   lowConfidence: boolean;
   calls: CallTelemetry[];

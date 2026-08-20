@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { runSwotAnalysis, runGrowthAnalysis, runMemoAnalysis, AnalyzeError } from "../../../lib/analyze";
+import {
+  runSwotAnalysis,
+  runGrowthAnalysis,
+  runMemoAnalysis,
+  runValueChainAnalysis,
+  AnalyzeError,
+} from "../../../lib/analyze";
 import { GeminiError } from "../../../lib/providers/gemini";
 import type { CompanyInput } from "../../../prompts/tasks";
 
@@ -7,10 +13,11 @@ const RUNNERS = {
   swot: runSwotAnalysis,
   growth: runGrowthAnalysis,
   memo: runMemoAnalysis,
+  valuechain: runValueChainAnalysis,
 } as const;
 type ModuleKey = keyof typeof RUNNERS;
 function isModule(x: unknown): x is ModuleKey {
-  return x === "swot" || x === "growth" || x === "memo";
+  return x === "swot" || x === "growth" || x === "memo" || x === "valuechain";
 }
 
 export const runtime = "nodejs";

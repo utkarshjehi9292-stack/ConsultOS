@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { toGrowth, toMemo, toCompanyProfile, toSwot } from "./wire";
-import { GrowthResultSchema, MemoResultSchema } from "./schemas";
+import { toGrowth, toMemo, toValueChain, toCompanyProfile, toSwot } from "./wire";
+import { GrowthResultSchema, MemoResultSchema, ValueChainResultSchema } from "./schemas";
 
 describe("toGrowth", () => {
   const raw = {
@@ -142,6 +142,57 @@ describe("toMemo", () => {
       module: "memo",
       company: toCompanyProfile({ name: "Acme", oneLiner: "x", facts: [], financialsStatus: "unavailable" }),
       memo: toMemo(raw),
+      sources: [],
+      confidence: { coveragePct: 50, sourceCount: 1, mostRecentSourceDaysAgo: null, band: "medium" },
+      notInData: [],
+      provenance: { researchProvider: "gemini", analysisModel: "m", extractModel: "e", generatedAt: "t" },
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("toValueChain", () => {
+  const raw = {
+    steps: [
+      {
+        step: "Restaurant onboarding",
+        performedBy: "in-house sales team",
+        significance: "high",
+        likelyLeak: "high CAC per merchant vs. take rate",
+        evidenceKind: "assumption",
+        assumptionNote: "typical for marketplaces",
+        confidence: "medium",
+      },
+      {
+        step: "Last-mile delivery",
+        performedBy: "gig fleet partners",
+        significance: "medium",
+        likelyLeak: "delivery cost subsidy",
+        evidenceKind: "citation",
+        sourceUrl: "https://example.com/a",
+        sourceTitle: "Report",
+        confidence: "medium",
+      },
+    ],
+    notInData: ["exact take rate"],
+  };
+
+  it("maps steps with performedBy, significance, leak, and evidence union", () => {
+    const { steps, notInData } = toValueChain(raw);
+    expect(steps).toHaveLength(2);
+    expect(steps[0]!.performedBy).toMatch(/in-house/);
+    expect(steps[0]!.significance).toBe("high");
+    expect(steps[0]!.evidence.kind).toBe("assumption");
+    expect(steps[1]!.evidence.kind).toBe("citation");
+    expect(notInData).toContain("exact take rate");
+  });
+
+  it("validates against ValueChainResultSchema", () => {
+    const { steps } = toValueChain(raw);
+    const r = ValueChainResultSchema.safeParse({
+      module: "valuechain",
+      company: toCompanyProfile({ name: "Acme", oneLiner: "x", facts: [], financialsStatus: "unavailable" }),
+      valueChain: { steps, biggestLeak: steps[0]!.step },
       sources: [],
       confidence: { coveragePct: 50, sourceCount: 1, mostRecentSourceDaysAgo: null, band: "medium" },
       notInData: [],

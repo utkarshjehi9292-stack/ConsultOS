@@ -1,5 +1,12 @@
 import { getLatestAnalysis } from "../../../db/store";
-import type { Claim, GrowthResult, MemoResult, Opportunity, StoredResult } from "../../../lib/schemas";
+import type {
+  Claim,
+  GrowthResult,
+  MemoResult,
+  Opportunity,
+  StoredResult,
+  ValueChainResult,
+} from "../../../lib/schemas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +22,7 @@ const MODULE_LABEL: Record<StoredResult["module"], string> = {
   swot: "SWOT analysis",
   growth: "Growth opportunities",
   memo: "Consultant's memo",
+  valuechain: "Value chain diagnostic",
 };
 
 export default async function CompanyPage({ params }: { params: Promise<{ id: string }> }) {
@@ -75,6 +83,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
       {result.module === "swot" && <SwotView swot={result.swot} facts={company.facts} />}
       {result.module === "growth" && <GrowthView growth={result.growth} facts={company.facts} />}
       {result.module === "memo" && <MemoView memo={result.memo} />}
+      {result.module === "valuechain" && <ValueChainView vc={result.valueChain} />}
 
       {notInData.length > 0 && (
         <section className="mt-10 rounded-md border border-line bg-white p-4">
@@ -220,6 +229,44 @@ function GrowthView({ growth, facts }: { growth: GrowthResult["growth"]; facts: 
           </ul>
         </details>
       )}
+    </section>
+  );
+}
+
+// --- Value Chain -------------------------------------------------------------
+
+function ValueChainView({ vc }: { vc: ValueChainResult["valueChain"] }) {
+  const sig = (s: string) => (s === "high" ? "text-flag" : s === "medium" ? "text-reading" : "text-ink/50");
+  return (
+    <section className="mt-8">
+      <h2 className="font-serif text-xl text-ink">Value chain diagnostic</h2>
+      <p className="mt-1 text-sm text-ink/60">
+        Actual steps for this company, upstream to downstream. The highest-significance leak is flagged.
+      </p>
+      <div className="mt-4 space-y-3">
+        {vc.steps.map((s, i) => (
+          <article
+            key={i}
+            className={`rounded-md border bg-white p-4 ${s.step === vc.biggestLeak ? "border-flag" : "border-line"}`}
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="font-serif text-lg text-ink">
+                {i + 1}. {s.step}
+              </h3>
+              <div className="flex items-center gap-2 text-xs">
+                {s.step === vc.biggestLeak && (
+                  <span className="rounded bg-flag/15 px-2 py-0.5 font-medium text-flag">Biggest leak</span>
+                )}
+                <span className={`font-medium ${sig(s.significance)}`}>{s.significance} significance</span>
+              </div>
+            </div>
+            <p className="mt-1 text-sm text-ink/70">Performed by: {s.performedBy}</p>
+            <div className="mt-2">
+              <ClaimRow claim={{ statement: `Likely leak: ${s.likelyLeak}`, evidence: s.evidence, confidence: s.confidence }} inline />
+            </div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
