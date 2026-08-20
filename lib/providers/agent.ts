@@ -26,9 +26,12 @@ function num(v: unknown): number {
 }
 
 /** A minimal view of the SDK's final-result message (version-tolerant). */
-interface FinalResultLike {
+/** The real Claude Agent SDK final message: `type: "result"` (not "final_result"). */
+interface ResultLike {
   type?: string;
-  text?: string;
+  subtype?: string;
+  is_error?: boolean;
+  result?: string;
   usage?: { input_tokens?: number; output_tokens?: number };
   total_cost_usd?: number;
 }
@@ -49,20 +52,28 @@ export async function researchWithAgent(opts: {
     cwd: process.cwd(),
   };
 
-  let finalText = "";
   let usage: Usage = ZERO_USAGE;
   let costUsd: number | null = null;
 
-  for await (const message of query({ prompt: opts.prompt, options })) {
-    const m = message as FinalResultLike;
-    if (m.type === "final_result") {
-      finalText = m.text ?? "";
-      const inTok = num(m.usage?.input_tokens);
-      const outTok = num(m.usage?.output_tokens);
-      usage = { inputTokens: inTok, outputTokens: outTok, thoughtTokens: 0, totalTokens: inTok + outTok };
-      costUsd = typeof m.total_cost_usd === "number" ? m.total_cost_usd : null;
+  // The final message has type "result" (result text, usage, cost). The CLI can
+  // exit non-zero on an API error (e.g. low credit) AFTER delivering it — if we
+  // captured a result we use it; otherwise we rethrow so the caller falls back.
+  let resultMsg: ResultLike | null = null;
+  try {
+    for await (const message of query({ prompt: opts.prompt, options })) {
+      if ((message as ResultLike).type === "result") resultMsg = message as ResultLike;
     }
+  } catch (e) {
+    if (!resultMsg) throw e;
   }
+  if (!resultMsg) throw new Error("Claude Agent SDK returned no result message.");
+  if (resultMsg.is_error) throw new Error(`Claude Agent SDK error: ${resultMsg.result ?? "unknown"}`);
+
+  const finalText = resultMsg.result ?? "";
+  const inTok = num(resultMsg.usage?.input_tokens);
+  const outTok = num(resultMsg.usage?.output_tokens);
+  usage = { inputTokens: inTok, outputTokens: outTok, thoughtTokens: 0, totalTokens: inTok + outTok };
+  costUsd = typeof resultMsg.total_cost_usd === "number" ? resultMsg.total_cost_usd : null;
 
   // The agent is asked to end with a JSON object: { findings, sources: [{url,title,date}] }.
   let findings = finalText;
